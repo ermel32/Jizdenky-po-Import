@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Můj pracovní den – Praha</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+</head>
+<body>
+
+<div class="app">
+  <header>
+    <div class="title">
+      <h1>🚆 Můj pracovní den</h1>
+      <small>Praha · jízdenky · MHD · statistiky</small>
+    </div>
+    <div class="header-actions">
+      <button class="btn" id="btnExport">⬇ Export</button>
+      <button class="btn btn-primary" id="btnImport">⬆ Import (PDF / Text)</button>
+    </div>
+  </header>
+
+  <nav class="nav">
+    <button id="nav-today" data-view="today">📅 Den</button>
+    <button id="nav-month" data-view="month">🗓️ Měsíc</button>
+    <button id="nav-stats" data-view="stats">📊 Statistiky</button>
+  </nav>
+
+  <main id="app"></main>
+</div>
+
+<!-- MODÁLNÍ OKNA -->
+
+<div id="universalImportModal" class="modal-backdrop">
+  <div class="modal" style="width:min(600px, 100%)">
+    <h2>⬆️ Import výpisu nebo dat</h2>
+    <p class="muted">Vyberte PDF soubor s výpisem z Air Bank, nebo vložte text.</p>
+    <div class="form-group" style="margin-bottom:12px;">
+      <label>Vybrat soubor (PDF výpis z banky nebo JSON záloha)</label>
+      <input type="file" id="importFileInput" accept=".pdf,.txt,.json" style="padding:6px">
+    </div>
+    <div class="form-group full" style="margin-bottom:12px;">
+      <label>Nebo vložte text z výpisu sem</label>
+      <textarea id="importTextArea" rows="6" placeholder="Text se objeví po načtení PDF..."></textarea>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="btnCancelImport">Zrušit</button>
+      <button type="button" class="btn btn-primary" id="btnProcessImport">Zpracovat a importovat</button>
+    </div>
+  </div>
+</div>
+
+<div id="ticketModal" class="modal-backdrop">
+  <div class="modal">
+    <h2 id="ticketModalTitle">Přidat vlak</h2>
+    <form id="ticketForm">
+      <input type="hidden" id="editTicketId">
+      <div class="form-grid">
+        <div class="form-group"><label>Datum</label><input id="ticketDate" type="date" required></div>
+        <div class="form-group"><label>Stav</label><select id="ticketStatus"><option value="planned">Plán</option><option value="done">Uskutečněno</option></select></div>
+        <div class="form-group"><label>Vlak</label><input id="ticketTrain" required></div>
+        <div class="form-group"><label>Směr</label><select id="ticketDirection"><option value="outbound">Bohumín → Praha</option><option value="return">Praha → Bohumín</option></select></div>
+        <div class="form-group"><label>Odkud</label><input id="ticketFrom" required></div>
+        <div class="form-group"><label>Kam</label><input id="ticketTo" required></div>
+        <div class="form-group"><label>Odjezd</label><input id="ticketDep" type="time" required></div>
+        <div class="form-group"><label>Příjezd</label><input id="ticketArr" type="time" required></div>
+        <div class="form-group"><label>Vůz</label><input id="ticketCar"></div>
+        <div class="form-group"><label>Místo</label><input id="ticketSeat"></div>
+        <div class="form-group"><label>Cena (Kč)</label><input id="ticketPrice" type="number" min="0" step="1"></div>
+        <div class="form-group"><label>Kilometry (km)</label><input id="ticketKm" type="number" min="0" step="1" value="375"></div>
+        <div class="form-group full"><label><input id="ticketQuiet" type="checkbox">Tichý oddíl</label></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="btnCancelTicket">Zrušit</button>
+        <button type="submit" class="btn btn-primary">Uložit vlak</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="expenseModal" class="modal-backdrop">
+  <div class="modal">
+    <h2>Nový výdaj</h2>
+    <div class="quick-expenses">
+      <button type="button" class="quick-expense-btn" data-desc="☕ Káva" data-amount="60">☕ Káva</button>
+      <button type="button" class="quick-expense-btn" data-desc="🍽️ Oběd" data-amount="150">🍽️ Oběd</button>
+      <button type="button" class="quick-expense-btn" data-desc="🍺 Pivo" data-amount="80">🍺 Pivo</button>
+      <button type="button" class="quick-expense-btn" data-desc="🚕 Taxi" data-amount="120">🚕 Taxi</button>
+      <button type="button" class="quick-expense-btn" data-desc="🅿️ Parkování" data-amount="100">🅿️ Parkování</button>
+      <button type="button" class="quick-expense-btn" data-desc="📦 Jiný výdaj" data-amount="">📦 Jiný</button>
+    </div>
+    <form id="expenseForm">
+      <div class="form-grid">
+        <div class="form-group"><label>Datum</label><input id="expenseDate" type="date" required></div>
+        <div class="form-group"><label>Částka (Kč)</label><input id="expenseAmount" type="number" min="0" required></div>
+        <div class="form-group full"><label>Popis / Kategorie</label><input id="expenseDescription" placeholder="Např. káva, oběd..." required></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="btnCancelExpense">Zrušit</button>
+        <button type="submit" class="btn btn-primary">Uložit</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="storage.js"></script>
+<script src="components.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>
