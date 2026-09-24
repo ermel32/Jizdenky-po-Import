@@ -389,7 +389,7 @@ class App {
         .map(line => line.trim())
         .filter(line => line.length > 0);
 
-      const dateRegex = /^(\d{2})\.(\d{2})\.(\d{4})/);
+      const dateRegex = /^(\d{2})\.(\d{2})\.(\d{4})/;
 
       // PDF částku vrací např.:
       // -46,00 0,00
