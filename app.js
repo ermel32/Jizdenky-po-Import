@@ -357,16 +357,19 @@ class App {
     reader.readAsText(file);
   }
 
-  processImport() {
+    processImport() {
     const text = document.getElementById("importTextArea").value.trim();
+
     if (!text) {
       alert("Není zde žádný text k zpracování.");
       return;
     }
 
     try {
+      // JSON záloha
       if (text.startsWith("{") || text.startsWith("[")) {
         const data = JSON.parse(text);
+
         if (data.tickets && confirm("Import nahradí současná data. Pokračovat?")) {
           this.data.import(data);
           this.render();
@@ -376,53 +379,186 @@ class App {
         }
       }
 
-      // PARSE AIR BANK
-      const lines = text.split("\n").map(l => l.trim()).filter(l => l.length > 0);
-      let addedCount = 0;
-      let currentDate = null;
+      // --------------------------------------------------
+      // AIR BANK PDF – PID LÍTAČKA
+      // --------------------------------------------------
 
-      const regexDatum = /^(\d{2})\.(\d{2})\.(\d{4})/;
-      const regexCastka = /^(-?\d+(?:[,\.]\d{1,2})?)\s*(?:Kč|CZK)?$/i;
+      const lines = text
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => line.length > 0);
+
+      const dateRegex = /^(\d{2})\.(\d{2})\.(\d{4})/;
+
+      // PDF obsahuje např.:
+      // -46,00 0,00
+      // -36,00 0,00
+      //
+      // Proto hledáme zápornou částku uvnitř celého bloku.
+      const amountRegex = /-\s*(\d+(?:[ .]\d{3})*(?:[,.]\d{1,2}))/;
+
+      const transactions = [];
 
       for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const dateMatch = line.match(regexDatum);
-        if (dateMatch) {
-          currentDate = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+
+        const dateMatch = lines[i].match(dateRegex);
+
+        if (!dateMatch) {
           continue;
         }
 
-        const cleanLine = line.toLowerCase().replace(/\s+/g, "");
-        const isLitacka = cleanLine.includes("pid") || cleanLine.includes("litacka");
+        const currentDate =
+          `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
 
-        if (isLitacka && currentDate) {
-          for (let j = i + 1; j <= Math.min(lines.length - 1, i + 5); j++) {
-            const amountMatch = lines[j].match(regexCastka);
-            if (amountMatch) {
-              let amount = parseFloat(amountMatch[1].replace(",", "."));
-              if (amount < 0) amount = Math.abs(amount);
-              if (amount > 0 && amount < 10000) {
-                const exists = this.expenseManager.data.expenses.some(e =>
-                  e.date === currentDate && e.amount === amount && e.description.includes("PID")
-                );
-                if (!exists) {
-                  this.expenseManager.add({
-                    date: currentDate,
-                    amount: amount,
-                    description: "PID Lítačka jízdné"
-                  });
-                  addedCount++;
-                }
-                break;
-              }
-            }
-          }
+        // Najdeme konec této konkrétní transakce.
+        let end = i + 1;
+
+        while (
+          end < lines.length &&
+          !dateRegex.test(lines[end])
+        ) {
+          end++;
         }
+
+        // Celý text jedné transakce
+        const block = lines
+          .slice(i, end)
+          .join(" ");
+
+        const normalizedBlock = block
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/\s+/g, "");
+
+        // Zatím importujeme pouze PID Lítačku.
+        if (
+          !normalizedBlock.includes("pidlitacka") &&
+          !normalizedBlock.includes("litacka")
+        ) {
+          i = end - 1;
+          continue;
+        }
+
+        const amountMatch = block.match(amountRegex);
+
+        if (!amountMatch) {
+          i = end - 1;
+          continue;
+        }
+
+        const amount = Number(
+          amountMatch[1]
+            .replace(/\s/g, "")
+            .replace(/\./g, "")
+            .replace(",", ".")
+        );
+
+        if (
+          !Number.isFinite(amount) ||
+          amount <= 0 ||
+          amount >= 10000
+        ) {
+          i = end - 1;
+          continue;
+        }
+
+        transactions.push({
+          date: currentDate,
+          amount: amount,
+          description: "PID Lítačka jízdné"
+        });
+
+        // Přeskočíme celou tuto transakci.
+        i = end - 1;
       }
 
-      alert(`Úspěšně importováno ${addedCount} plateb PID Lítačky.`);
+      if (transactions.length === 0) {
+        alert(
+          "V PDF nebyla nalezena žádná platba PID Lítačky."
+        );
+        return;
+      }
+
+      // --------------------------------------------------
+      // DUPLICITY
+      // --------------------------------------------------
+      //
+      // Důležité:
+      // datum + částka NESMÍ být samotný klíč.
+      //
+      // Například:
+      //
+      // 09.09.2026 -36 Kč
+      // 09.09.2026 -36 Kč
+      //
+      // jsou dvě skutečné platby.
+      //
+      // Proto používáme pořadí stejné transakce v PDF.
+      // --------------------------------------------------
+
+      const occurrence = {};
+
+      let addedCount = 0;
+      let skippedCount = 0;
+
+      for (const transaction of transactions) {
+
+        const baseKey =
+          `${transaction.date}|` +
+          `${transaction.amount}|` +
+          `${transaction.description}`;
+
+        occurrence[baseKey] =
+          (occurrence[baseKey] || 0) + 1;
+
+        const importKey =
+          `pdf|${baseKey}|${occurrence[baseKey]}`;
+
+        // Je tato konkrétní transakce už v aplikaci?
+        const exists =
+          this.expenseManager.data.expenses.some(
+            e => e.importKey === importKey
+          );
+
+        if (exists) {
+          skippedCount++;
+          continue;
+        }
+
+        this.expenseManager.add({
+          date: transaction.date,
+          amount: transaction.amount,
+          description: transaction.description,
+
+          // Informace, že výdaj přišel z PDF
+          source: "pdf",
+
+          // Jedinečný identifikátor importované transakce
+          importKey: importKey
+        });
+
+        addedCount++;
+      }
+
       this.render();
       this.closeImportModal();
+
+      if (addedCount === 0 && skippedCount > 0) {
+        alert(
+          `Tento výpis už byl importován.\n` +
+          `Nové platby: 0\n` +
+          `Přeskočené duplicity: ${skippedCount}`
+        );
+      } else {
+        alert(
+          `Úspěšně importováno ${addedCount} plateb PID Lítačky.` +
+          (skippedCount > 0
+            ? `\nPřeskočené duplicity: ${skippedCount}`
+            : "")
+        );
+      }
+
     } catch (err) {
       console.error(err);
       alert("Chyba při zpracování importu.");
