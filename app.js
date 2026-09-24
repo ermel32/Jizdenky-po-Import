@@ -357,7 +357,7 @@ class App {
     reader.readAsText(file);
   }
 
-      processImport() {
+        processImport() {
     const text = document.getElementById("importTextArea").value.trim();
 
     if (!text) {
