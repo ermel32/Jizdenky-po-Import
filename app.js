@@ -314,13 +314,16 @@ class App {
 
     this.pendingImportFile = file;
 
+    // ČD Google Takeout ZIP – necháme zpracování na CDTakeoutImporter.
     if (file.name.toLowerCase().endsWith(".zip")) {
       document.getElementById("importTextArea").value =
-        `Vybrán ČD Google Takeout ZIP: ${file.name}\n\nPo kliknutí na „Zpracovat a importovat“ aplikace ZIP sama rozbalí, projde ČD e-maily, spáruje storna a přidá pouze aktuální jízdenky.`;
+        `Vybrán ČD Google Takeout ZIP: ${file.name}\n\n` +
+        `Po kliknutí na „Zpracovat a importovat“ aplikace ZIP rozbalí, ` +
+        `projede ČD e-maily, spáruje storna a přidá pouze aktuální jízdenky.`;
       return;
     }
 
-    if (file.type === "application/json" || file.name.endsWith(".json")) {
+    if (file.type === "application/json" || file.name.toLowerCase().endsWith(".json")) {
       const reader = new FileReader();
       reader.onload = (e) => {
         document.getElementById("importTextArea").value = e.target.result;
@@ -329,7 +332,7 @@ class App {
       return;
     }
 
-    if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
+    if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
       try {
         const arrayBuffer = await file.arrayBuffer();
         const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -341,7 +344,7 @@ class App {
           let lastY = null;
           let lineText = "";
 
-          for (let item of textContent.items) {
+          for (const item of textContent.items) {
             if (lastY !== null && Math.abs(item.transform[5] - lastY) > 5) {
               fullText += lineText + "\n";
               lineText = "";
@@ -368,8 +371,9 @@ class App {
     reader.readAsText(file);
   }
 
+
   async processImport() {
-    // ČD Google Takeout ZIP – zpracovává se přímo jako archiv, ne jako text.
+    // ČD Google Takeout ZIP – zpracovává se přímo jako archiv.
     if (this.pendingImportFile && this.pendingImportFile.name.toLowerCase().endsWith(".zip")) {
       const btn = document.getElementById("btnProcessImport");
       const originalText = btn.textContent;
@@ -415,6 +419,7 @@ class App {
     }
 
     try {
+      // JSON backup import
       if (text.startsWith("{") || text.startsWith("[")) {
         const data = JSON.parse(text);
         if (data.tickets && confirm("Import nahradí současná data. Pokračovat?")) {
@@ -426,57 +431,133 @@ class App {
         }
       }
 
-      // PARSE AIR BANK / PID
-      const lines = text.split("\n").map(l => l.trim()).filter(l => l.length > 0);
-      let addedCount = 0;
-      let currentDate = null;
+      // AIR BANK / PID Lítačka PDF import – ponecháno z poslední funkční verze.
+      const lines = text
+        .split(/\r?\n/)
+        .map(l => l.trim())
+        .filter(l => l.length > 0);
 
       const regexDatum = /^(\d{2})\.(\d{2})\.(\d{4})/;
-      const regexCastka = /^(-?\d+(?:[,\.]\d{1,2})?)\s*(?:Kč|CZK)?$/i;
+      const regexZapornaCastka = /-\s*(\d+(?:[ .]\d{3})*(?:[,.]\d{1,2}))/;
+
+      const transactions = [];
 
       for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const dateMatch = line.match(regexDatum);
-        if (dateMatch) {
-          currentDate = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+        const dateMatch = lines[i].match(regexDatum);
+        if (!dateMatch) continue;
+
+        const currentDate = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+
+        let end = i + 1;
+        while (end < lines.length && !regexDatum.test(lines[end])) {
+          end++;
+        }
+
+        const block = lines.slice(i, end).join(" ");
+        const cleanBlock = block
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/\s+/g, "");
+
+        if (!cleanBlock.includes("pidlitacka") && !cleanBlock.includes("litacka")) {
+          i = end - 1;
           continue;
         }
 
-        const cleanLine = line.toLowerCase().replace(/\s+/g, "");
-        const isLitacka = cleanLine.includes("pid") || cleanLine.includes("litacka");
-
-        if (isLitacka && currentDate) {
-          for (let j = i + 1; j <= Math.min(lines.length - 1, i + 5); j++) {
-            const amountMatch = lines[j].match(regexCastka);
-            if (amountMatch) {
-              let amount = parseFloat(amountMatch[1].replace(",", "."));
-              if (amount < 0) amount = Math.abs(amount);
-              if (amount > 0 && amount < 10000) {
-                const exists = this.expenseManager.data.expenses.some(e =>
-                  e.date === currentDate && e.amount === amount && e.description.includes("PID")
-                );
-                if (!exists) {
-                  this.expenseManager.add({
-                    date: currentDate,
-                    amount: amount,
-                    description: "PID Lítačka jízdné"
-                  });
-                  addedCount++;
-                }
-                break;
-              }
-            }
-          }
+        const amountMatch = block.match(regexZapornaCastka);
+        if (!amountMatch) {
+          i = end - 1;
+          continue;
         }
+
+        const amount = Number(
+          amountMatch[1]
+            .replace(/\s/g, "")
+            .replace(/\./g, "")
+            .replace(",", ".")
+        );
+
+        if (!Number.isFinite(amount) || amount <= 0 || amount >= 10000) {
+          i = end - 1;
+          continue;
+        }
+
+        transactions.push({
+          date: currentDate,
+          amount,
+          description: "PID Lítačka jízdné"
+        });
+
+        i = end - 1;
       }
 
-      alert(`Úspěšně importováno ${addedCount} plateb PID Lítačky.`);
+      if (transactions.length === 0) {
+        alert("V PDF nebyla nalezena žádná platba PID Lítačky.");
+        return;
+      }
+
+      const importBatch = this.makeImportHash(
+        transactions
+          .map(t => `${t.date}|${t.amount}|${t.description}`)
+          .join("\n")
+      );
+
+      const storedBatches = this.getStoredPdfImportBatches();
+
+      if (storedBatches.includes(importBatch)) {
+        alert("Tento výpis už byl do aplikace importován. Nebyly přidány žádné nové platby.");
+        this.closeImportModal();
+        return;
+      }
+
+      let addedCount = 0;
+
+      for (const transaction of transactions) {
+        this.expenseManager.add({
+          date: transaction.date,
+          amount: transaction.amount,
+          description: transaction.description,
+          source: "pdf",
+          importBatch
+        });
+        addedCount++;
+      }
+
+      storedBatches.push(importBatch);
+      this.savePdfImportBatches(storedBatches);
+
       this.render();
       this.closeImportModal();
+
+      alert(`Úspěšně importováno ${addedCount} plateb PID Lítačky.`);
     } catch (err) {
       console.error(err);
       alert("Chyba při zpracování importu.");
     }
+  }
+
+
+  makeImportHash(value) {
+    // Jednoduchý stabilní hash fungující i bez serveru.
+    let hash = 2166136261;
+    for (let i = 0; i < value.length; i++) {
+      hash ^= value.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `pdf-${(hash >>> 0).toString(16)}`;
+  }
+
+  getStoredPdfImportBatches() {
+    try {
+      return JSON.parse(localStorage.getItem("mujPracovniDenPdfImports") || "[]");
+    } catch {
+      return [];
+    }
+  }
+
+  savePdfImportBatches(batches) {
+    localStorage.setItem("mujPracovniDenPdfImports", JSON.stringify(batches));
   }
 
   exportData() {
