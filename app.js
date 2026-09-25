@@ -55,7 +55,8 @@ class App {
         const subtype = e.target.dataset.subtype || "";
         document.getElementById("expenseDescription").value = desc;
         document.getElementById("expenseCategory").value = category;
-        document.getElementById("expenseSubtype").value = subtype;
+        const subtypeEl = document.getElementById("expenseSubtype");
+        if (subtypeEl) subtypeEl.value = subtype;
         if (amount) document.getElementById("expenseAmount").value = amount;
       });
     });
@@ -163,13 +164,15 @@ class App {
       if (type === "homeoffice") { monthHOCount++; continue; }
       if (this.workPlanManager.isPlanned(key)) monthPlannedCount++;
       const mainTickets = this.ticketManager.getForDate(key)
-        .filter(t => this.ticketManager.isValid(t) && (t.ticketType || "main") === "main");
+        .filter(t => this.ticketManager.isValid(t) && (t.ticketType || "main") === "main")
+        .filter(t => this.ticketManager.getStatus(t) === "done");
       if (mainTickets.length > 0) monthExecutedCount++;
     }
 
+    // HO plán se vztahuje k celému vybranému měsíci, ne jen k již uplynulým dnům.
     const workdays = Array.from({length: days}, (_, i) => i + 1).filter(day => {
       const d = new Date(this.calendarDate.getFullYear(), this.calendarDate.getMonth(), day);
-      return d.getDay() !== 0 && d.getDay() !== 6 && keyFromDate(this.calendarDate.getFullYear(), this.calendarDate.getMonth(), day) <= currentKey;
+      return d.getDay() !== 0 && d.getDay() !== 6;
     }).length;
     const expectedHO = Math.round(workdays * 0.20);
 
@@ -276,7 +279,8 @@ class App {
     document.getElementById("expenseAmount").value = "";
     document.getElementById("expenseDescription").value = "";
     document.getElementById("expenseCategory").value = "other";
-    document.getElementById("expenseSubtype").value = "";
+    const subtypeEl = document.getElementById("expenseSubtype");
+    if (subtypeEl) subtypeEl.value = "";
     document.getElementById("expenseModal").classList.add("show");
   }
 
@@ -292,7 +296,7 @@ class App {
       amount: Number(document.getElementById("expenseAmount").value || 0),
       description: document.getElementById("expenseDescription").value.trim(),
       category: document.getElementById("expenseCategory").value,
-      subtype: document.getElementById("expenseSubtype").value
+      subtype: document.getElementById("expenseSubtype")?.value || ""
     });
     this.closeExpenseModal();
     this.render();

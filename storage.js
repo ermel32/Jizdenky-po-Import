@@ -290,7 +290,8 @@ class StatsCalculator {
     const currentKey = todayKey();
     const tickets = this.ticketManager.data.tickets
       .filter(t => t.date.startsWith(monthKey) && t.date <= currentKey && this.ticketManager.isValid(t))
-      .filter(t => (t.ticketType || "main") === "main");
+      .filter(t => (t.ticketType || "main") === "main")
+      .filter(t => this.ticketManager.getStatus(t) === "done");
     const expenses = this.expenseManager.getForMonth(monthKey);
 
     const totalKm = tickets.reduce((sum, t) => sum + Number(t.km || 375), 0);

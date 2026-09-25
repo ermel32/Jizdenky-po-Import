@@ -166,6 +166,10 @@ class CDTakeoutImporter {
     Object.assign(ticket, this.parseIcs(ics ? this.decodeBytes(ics.content) : ""));
     Object.assign(ticket, this.parsePdfFallback(pdfText));
 
+    // ČD PDF obsahuje informaci o tichém oddílu/kupé. Uložíme ji jako
+    // boolean, aby se dala zobrazit v detailu dne i v kalendáři.
+    ticket.quiet = this.detectQuiet(pdfText);
+
     ticket.direction = String(ticket.from || "").toLowerCase().includes("praha") ? "return" : "outbound";
     ticket.status = ticket.date && ticket.date < todayKey() ? "done" : "planned";
 
@@ -328,6 +332,16 @@ class CDTakeoutImporter {
       .replace(/\\,/g, ",")
       .replace(/\\;/g, ";")
       .replace(/\\\\/g, "\\");
+  }
+
+  detectQuiet(text) {
+    const normalized = String(text || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, " ")
+      .toLowerCase();
+
+    return /tich(?:y|e)\s+(?:oddil|kupe|vuz)|quiet\s+(?:section|compartment|car)/i.test(normalized);
   }
 
   parsePdfFallback(text) {

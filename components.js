@@ -158,7 +158,7 @@ class CalendarRenderer {
 
   render(year, month) {
     const monthName = new Date(year, month).toLocaleDateString("cs-CZ", { month: "long", year: "numeric" });
-    let html = `<div class="panel"><div class="calendar-header"><button data-action="prev-month">‹</button><div class="calendar-title">${monthName}</div><button data-action="next-month">›</button></div><div class="calendar-legend"><span>🔵✓ Praha</span><span>🏠 HO</span><span>🏖️ dovolená</span><span>• výdaj</span></div><div class="calendar-grid">
+    let html = `<div class="panel"><div class="calendar-header"><button data-action="prev-month">‹</button><div class="calendar-title">${monthName}</div><button data-action="next-month">›</button></div><div class="calendar-legend"><span class="legend-praha">✓ Praha</span><span>🏠 HO</span><span>🏖️ dovolená</span><span>• výdaj</span></div><div class="calendar-grid">
       <div class="calendar-weekday">Po</div><div class="calendar-weekday">Út</div><div class="calendar-weekday">St</div><div class="calendar-weekday">Čt</div><div class="calendar-weekday">Pá</div><div class="calendar-weekday weekend">So</div><div class="calendar-weekday weekend">Ne</div>`;
 
     let firstDay = new Date(year, month, 1).getDay();
@@ -176,7 +176,7 @@ class CalendarRenderer {
       const validTickets = tickets.filter(t => this.ticketManager.isValid(t));
       const mainTickets = validTickets.filter(t => (t.ticketType || "main") === "main").sort((a,b) => (a.dep||"").localeCompare(b.dep||""));
       const partialTickets = validTickets.filter(t => (t.ticketType || "main") === "partial");
-      const isPlanned = this.workPlanManager.isPlanned(key);
+      const executedMainTickets = mainTickets.filter(t => this.ticketManager.getStatus(t) === "done");
       const dayType = this.workPlanManager.getDayType(key);
       const isToday = key === currentKey;
       const hasExpense = this.expenseManager.getForDate(key).length > 0;
@@ -189,13 +189,12 @@ class CalendarRenderer {
       if (extraCount) ticketLines += `<div class="calendar-ticket-more">+${extraCount} další</div>`;
 
       let stateMark = "";
-      if (dayType === "vacation") stateMark = `<span class="day-state vacation" title="Dovolená">🏖️</span>`;
-      else if (dayType === "homeoffice") stateMark = `<span class="day-state homeoffice" title="Home office">🏠</span>`;
-      else if (mainTickets.length) stateMark = `<span class="day-state executed" title="Praha uskutečněna">🔵✓</span>`;
-      else if (isPlanned) stateMark = `<span class="day-state planned" title="Plánovaná Praha">○</span>`;
+      if (dayType === "vacation") stateMark = `<span class="day-state vacation" title="Dovolená">🏖️ DOVOLENÁ</span>`;
+      else if (dayType === "homeoffice") stateMark = `<span class="day-state homeoffice" title="Home office">🏠 HO</span>`;
+      else if (executedMainTickets.length) stateMark = `<span class="day-state executed" title="Praha uskutečněna">✓</span>`;
       if (hasExpense) stateMark += `<span class="expense-mark" title="Výdaj">•</span>`;
 
-      html += `<div class="calendar-day ${isToday ? "today" : ""} ${isWeekend ? "weekend" : ""} ${dayType !== "normal" ? `day-${dayType}` : ""}" data-action="select-day" data-date="${key}">
+      html += `<div class="calendar-day ${isToday ? "today" : ""} ${isWeekend ? "weekend" : ""} ${dayType !== "normal" ? `day-${dayType}` : ""} ${executedMainTickets.length ? "day-executed" : ""}" data-action="select-day" data-date="${key}">
         <div class="calendar-number"><span>${day}</span><div class="day-indicators">${stateMark}</div></div>
         <div class="calendar-tickets">${ticketLines}</div>
       </div>`;
