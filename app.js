@@ -51,7 +51,11 @@ class App {
       btn.addEventListener("click", (e) => {
         const desc = e.target.dataset.desc;
         const amount = e.target.dataset.amount;
+        const category = e.target.dataset.category || "other";
+        const subtype = e.target.dataset.subtype || "";
         document.getElementById("expenseDescription").value = desc;
+        document.getElementById("expenseCategory").value = category;
+        document.getElementById("expenseSubtype").value = subtype;
         if (amount) document.getElementById("expenseAmount").value = amount;
       });
     });
@@ -96,6 +100,10 @@ class App {
         break;
       case "set-plan":
         this.workPlanManager.set(target.dataset.date, target.dataset.value === "1");
+        this.render();
+        break;
+      case "set-day-type":
+        this.workPlanManager.setDayType(target.dataset.date, target.dataset.type);
         this.render();
         break;
       case "edit-ticket":
@@ -143,54 +151,45 @@ class App {
 
     let monthExecutedCount = 0;
     let monthPlannedCount = 0;
-    let monthTicketsCount = stats.ticketCount;
-    let monthKm = stats.totalKm;
-    let monthMinutes = stats.totalMinutes;
-    let monthTrainCost = stats.trainCost;
-
+    let monthHOCount = 0;
+    let monthVacationCount = 0;
     const days = daysInMonth(this.calendarDate.getFullYear(), this.calendarDate.getMonth());
+
     for (let day = 1; day <= days; day++) {
       const key = keyFromDate(this.calendarDate.getFullYear(), this.calendarDate.getMonth(), day);
-      if (key <= currentKey) {
-        if (this.workPlanManager.isPlanned(key)) monthPlannedCount++;
-        const validMainTickets = this.ticketManager.getForDate(key).filter(t => this.ticketManager.isValid(t) && this.ticketManager.isMain(t));
-        if (validMainTickets.some(t => this.ticketManager.getStatus(t) === "done")) monthExecutedCount++;
-      }
+      if (key > currentKey) continue;
+      const type = this.workPlanManager.getDayType(key);
+      if (type === "vacation") { monthVacationCount++; continue; }
+      if (type === "homeoffice") { monthHOCount++; continue; }
+      if (this.workPlanManager.isPlanned(key)) monthPlannedCount++;
+      const mainTickets = this.ticketManager.getForDate(key)
+        .filter(t => this.ticketManager.isValid(t) && (t.ticketType || "main") === "main");
+      if (mainTickets.length > 0) monthExecutedCount++;
     }
+
+    const workdays = Array.from({length: days}, (_, i) => i + 1).filter(day => {
+      const d = new Date(this.calendarDate.getFullYear(), this.calendarDate.getMonth(), day);
+      return d.getDay() !== 0 && d.getDay() !== 6 && keyFromDate(this.calendarDate.getFullYear(), this.calendarDate.getMonth(), day) <= currentKey;
+    }).length;
+    const expectedHO = Math.round(workdays * 0.20);
 
     const statsHtml = `
       <div class="panel">
         <div class="panel-title">
           <div>
             <h3>📊 ${this.calendarDate.toLocaleDateString("cs-CZ", { month: "long", year: "numeric" })} – průběžný přehled</h3>
-            <div class="muted">Statistiky počítané k dnešnímu dni</div>
+            <div class="muted">Statistiky pouze z hlavních platných jízdenek · pojistné jízdenky se nezapočítávají</div>
           </div>
         </div>
         <div class="stats-grid">
-          <div class="stat-card">
-            <div class="big">${monthExecutedCount}</div>
-            <div class="small">dny v Praze</div>
-          </div>
-          <div class="stat-card">
-            <div class="big">${monthTicketsCount}</div>
-            <div class="small">jízdy</div>
-          </div>
-          <div class="stat-card">
-            <div class="big">${monthKm} km</div>
-            <div class="small">ujetá vzdálenost</div>
-          </div>
-          <div class="stat-card">
-            <div class="big">${formatDuration(monthMinutes)}</div>
-            <div class="small">čas ve vlaku</div>
-          </div>
-          <div class="stat-card">
-            <div class="big">${money(monthTrainCost)}</div>
-            <div class="small">za jízdenky</div>
-          </div>
-          <div class="stat-card">
-            <div class="big">${money(stats.expenseCost)}</div>
-            <div class="small">ostatní výdaje</div>
-          </div>
+          <div class="stat-card"><div class="big">${monthExecutedCount}</div><div class="small">dny v Praze</div></div>
+          <div class="stat-card"><div class="big">${stats.ticketCount}</div><div class="small">hlavní jízdy</div></div>
+          <div class="stat-card"><div class="big">${stats.totalKm} km</div><div class="small">ujetá vzdálenost</div></div>
+          <div class="stat-card"><div class="big">${formatDuration(stats.totalMinutes)}</div><div class="small">čas ve vlaku</div></div>
+          <div class="stat-card"><div class="big">${money(stats.trainCost)}</div><div class="small">za hlavní jízdenky</div></div>
+          <div class="stat-card"><div class="big">${money(stats.expenseCost)}</div><div class="small">ostatní výdaje</div></div>
+          <div class="stat-card"><div class="big">${monthHOCount} / ${expectedHO}</div><div class="small">HO · skutečnost / plán 20 %</div></div>
+          <div class="stat-card"><div class="big">${monthVacationCount}</div><div class="small">dny dovolené</div></div>
         </div>
       </div>
     `;
@@ -207,7 +206,7 @@ class App {
     document.getElementById("ticketDate").value = ticket?.date || this.selectedDate;
     document.getElementById("ticketStatus").value = ticket?.status || "planned";
     document.getElementById("ticketType").value = ticket?.ticketType || "main";
-    document.getElementById("ticketTrain").value = ticket?.train || "";
+    document.getElementById("ticketTrain").value = normalizeTrainName(ticket?.train || "");
     document.getElementById("ticketDirection").value = ticket?.direction || "outbound";
     document.getElementById("ticketFrom").value = ticket?.from || "";
     document.getElementById("ticketTo").value = ticket?.to || "";
@@ -232,7 +231,7 @@ class App {
       date: document.getElementById("ticketDate").value,
       status: document.getElementById("ticketStatus").value,
       ticketType: document.getElementById("ticketType").value,
-      train: document.getElementById("ticketTrain").value.trim(),
+      train: normalizeTrainName(document.getElementById("ticketTrain").value.trim()),
       direction: document.getElementById("ticketDirection").value,
       from: document.getElementById("ticketFrom").value.trim(),
       to: document.getElementById("ticketTo").value.trim(),
@@ -240,10 +239,11 @@ class App {
       arr: document.getElementById("ticketArr").value,
       car: document.getElementById("ticketCar").value.trim(),
       seat: document.getElementById("ticketSeat").value.trim(),
-      price: Number(document.getElementById("ticketPrice").value || 0),
+      price: 0,
       km: Number(document.getElementById("ticketKm").value || 375),
       quiet: document.getElementById("ticketQuiet").checked
     };
+    data.price = data.ticketType === "main" ? getFixedTrainPrice({ ...data, price: Number(document.getElementById("ticketPrice").value || 0) }) : 0;
 
     if (id) {
       this.ticketManager.update(id, data);
@@ -275,6 +275,8 @@ class App {
     document.getElementById("expenseDate").value = dateKey;
     document.getElementById("expenseAmount").value = "";
     document.getElementById("expenseDescription").value = "";
+    document.getElementById("expenseCategory").value = "other";
+    document.getElementById("expenseSubtype").value = "";
     document.getElementById("expenseModal").classList.add("show");
   }
 
@@ -288,7 +290,9 @@ class App {
     this.expenseManager.add({
       date: dateKey,
       amount: Number(document.getElementById("expenseAmount").value || 0),
-      description: document.getElementById("expenseDescription").value.trim()
+      description: document.getElementById("expenseDescription").value.trim(),
+      category: document.getElementById("expenseCategory").value,
+      subtype: document.getElementById("expenseSubtype").value
     });
     this.closeExpenseModal();
     this.render();
@@ -451,18 +455,18 @@ class App {
         const currentDate = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
 
         let end = i + 1;
-        while (end < lines.length && !regexDatum.test(lines[end])) end++;
+        while (end < lines.length && !regexDatum.test(lines[end])) {
+          end++;
+        }
 
         const block = lines.slice(i, end).join(" ");
-        const normalized = block
+        const cleanBlock = block
           .toLowerCase()
           .normalize("NFD")
           .replace(/[\u0300-\u036f]/g, "")
           .replace(/\s+/g, "");
 
-        const isLitacka = normalized.includes("pidlitacka") || normalized.includes("litacka");
-        const isCsad = normalized.includes("csad");
-        if (!isLitacka && !isCsad) {
+        if (!cleanBlock.includes("pidlitacka") && !cleanBlock.includes("litacka")) {
           i = end - 1;
           continue;
         }
@@ -485,62 +489,66 @@ class App {
           continue;
         }
 
+        const litackaInfo = {
+          36: ["30 min", 1], 46: ["90 min", 1], 140: ["24 h", 1],
+          72: ["30 min", 2], 108: ["30 min", 3], 144: ["30 min", 4],
+          92: ["90 min", 2], 280: ["24 h", 2]
+        }[amount] || ["jízdenka", 1];
+
         transactions.push({
           date: currentDate,
           amount,
-          category: isCsad ? "csad" : "litacka",
-          description: isCsad ? "🚌 ČSAD" : "🚇 Lítačka"
+          description: "🚇 Lítačka jízdné",
+          category: "litacka",
+          subtype: litackaInfo[0],
+          quantity: litackaInfo[1]
         });
 
         i = end - 1;
       }
 
       if (transactions.length === 0) {
-        alert("V PDF nebyla nalezena žádná podporovaná platba Lítačky nebo ČSAD.");
+        alert("V PDF nebyla nalezena žádná platba PID Lítačky.");
         return;
       }
 
       const importBatch = this.makeImportHash(
         transactions
-          .map(t => `${t.date}|${t.amount}|${t.category}|${t.description}`)
+          .map(t => `${t.date}|${t.amount}|${t.description}`)
           .join("\n")
       );
 
       const storedBatches = this.getStoredPdfImportBatches();
+
+      if (storedBatches.includes(importBatch)) {
+        alert("Tento výpis už byl do aplikace importován. Nebyly přidány žádné nové platby.");
+        this.closeImportModal();
+        return;
+      }
+
       let addedCount = 0;
-      let skippedCount = 0;
 
       for (const transaction of transactions) {
-        const exists = this.expenseManager.data.expenses.some(e =>
-          e.date === transaction.date &&
-          Number(e.amount) === Number(transaction.amount) &&
-          (e.category || "") === transaction.category
-        );
-        if (exists) {
-          skippedCount++;
-          continue;
-        }
-
         this.expenseManager.add({
           date: transaction.date,
           amount: transaction.amount,
           description: transaction.description,
           category: transaction.category,
+          subtype: transaction.subtype,
+          quantity: transaction.quantity,
           source: "pdf",
           importBatch
         });
         addedCount++;
       }
 
-      if (!storedBatches.includes(importBatch)) {
-        storedBatches.push(importBatch);
-        this.savePdfImportBatches(storedBatches);
-      }
+      storedBatches.push(importBatch);
+      this.savePdfImportBatches(storedBatches);
 
       this.render();
       this.closeImportModal();
 
-      alert(`Import dokončen.\n\nPřidáno: ${addedCount}\nJiž existovalo: ${skippedCount}`);
+      alert(`Úspěšně importováno ${addedCount} plateb PID Lítačky.`);
     } catch (err) {
       console.error(err);
       alert("Chyba při zpracování importu.");

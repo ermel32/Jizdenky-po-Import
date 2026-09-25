@@ -7,6 +7,7 @@ class AppData {
     this.tickets = [];
     this.ticketStatusOverrides = {};
     this.workPlans = {};
+    this.dayTypes = {};
     this.expenses = [];
     this.load();
   }
@@ -19,6 +20,7 @@ class AppData {
       if (Array.isArray(data.tickets)) this.tickets = data.tickets;
       if (data.ticketStatusOverrides) this.ticketStatusOverrides = data.ticketStatusOverrides;
       if (data.workPlans) this.workPlans = data.workPlans;
+      if (data.dayTypes) this.dayTypes = data.dayTypes;
       if (Array.isArray(data.expenses)) this.expenses = data.expenses;
     } catch (error) {
       console.error("Chyba načítání dat:", error);
@@ -30,6 +32,7 @@ class AppData {
       tickets: this.tickets,
       ticketStatusOverrides: this.ticketStatusOverrides,
       workPlans: this.workPlans,
+      dayTypes: this.dayTypes,
       expenses: this.expenses
     }));
   }
@@ -41,6 +44,7 @@ class AppData {
       tickets: this.tickets,
       ticketStatusOverrides: this.ticketStatusOverrides,
       workPlans: this.workPlans,
+      dayTypes: this.dayTypes,
       expenses: this.expenses
     };
   }
@@ -49,6 +53,7 @@ class AppData {
     if (Array.isArray(data.tickets)) this.tickets = data.tickets;
     if (data.ticketStatusOverrides) this.ticketStatusOverrides = data.ticketStatusOverrides;
     if (data.workPlans) this.workPlans = data.workPlans;
+    if (data.dayTypes) this.dayTypes = data.dayTypes;
     if (Array.isArray(data.expenses)) this.expenses = data.expenses;
     this.save();
   }
@@ -121,13 +126,35 @@ function formatDuration(minutes) {
   return `${h} h ${m} min`;
 }
 
+// ===== FIXED TRAIN PRICING / DISPLAY =====
+function normalizeTrainName(train) {
+  const value = String(train || "").replace(/\s+/g, " ").trim();
+  const m = value.match(/\b(SC)\s*\d{2,4}\b/i);
+  if (m) return "SC Pendolino";
+  return value;
+}
+
+function getFixedTrainPrice(ticket) {
+  const train = normalizeTrainName(ticket?.train);
+  const dep = String(ticket?.dep || "");
+  const minutes = dep.includes(":") ? Number(dep.slice(0, 2)) * 60 + Number(dep.slice(3, 5)) : -1;
+
+  if (/^EN\s*442$/i.test(String(ticket?.train || ""))) return 600;
+  if (train === "SC Pendolino" && ticket?.direction === "outbound" && minutes >= 0 && minutes < 10 * 60) return 600;
+  if (/^IC\s*547$/i.test(String(ticket?.train || ""))) return 500;
+  if (train === "SC Pendolino" && ticket?.direction === "return" && minutes >= 17 * 60) return 450;
+
+  // Fallback for manually entered trains: preserve manually entered price.
+  return Number(ticket?.price || 0);
+}
+
 // ===== TRAIN TEMPLATES =====
 
 const TRAIN_TEMPLATES = {
-  morningEN: { train: "EN", direction: "outbound", from: "Bohumín", to: "Praha hl.n.", dep: "05:00", arr: "08:30", price: 600, km: 375 },
-  morningPendolino: { train: "SC Pendolino", direction: "outbound", from: "Bohumín", to: "Praha hl.n.", dep: "04:58", arr: "08:25", price: 560, km: 375 },
-  afternoonEx: { train: "Ex", direction: "return", from: "Praha hl.n.", to: "Bohumín", dep: "16:00", arr: "19:30", price: 600, km: 375 },
-  eveningPendolino: { train: "SC Pendolino", direction: "return", from: "Praha hl.n.", to: "Bohumín", dep: "18:00", arr: "21:25", price: 600, km: 375 }
+  morningEN: { train: "EN 442", direction: "outbound", from: "Bohumín", to: "Praha hl.n.", dep: "05:00", arr: "08:30", price: 600, km: 375 },
+  morningPendolino: { train: "SC Pendolino", direction: "outbound", from: "Bohumín", to: "Praha hl.n.", dep: "04:58", arr: "08:25", price: 600, km: 375 },
+  afternoonEx: { train: "IC 547", direction: "return", from: "Praha hl.n.", to: "Bohumín", dep: "16:00", arr: "19:30", price: 500, km: 375 },
+  eveningPendolino: { train: "SC Pendolino", direction: "return", from: "Praha hl.n.", to: "Bohumín", dep: "18:00", arr: "21:25", price: 450, km: 375 }
 };
 
 // ===== BUSINESS LOGIC =====
@@ -147,14 +174,6 @@ class TicketManager {
 
   isValid(ticket) {
     return !this.isCancelled(ticket);
-  }
-
-  isMain(ticket) {
-    return (ticket.ticketType || "main") === "main";
-  }
-
-  isPartial(ticket) {
-    return (ticket.ticketType || "main") === "partial";
   }
 
   setStatus(ticketId, status) {
@@ -212,6 +231,16 @@ class WorkPlanManager {
   isPlanned(dateKey) {
     return !!this.data.workPlans[dateKey];
   }
+
+  setDayType(dateKey, type) {
+    if (!type || type === "normal") delete this.data.dayTypes[dateKey];
+    else this.data.dayTypes[dateKey] = type;
+    this.data.save();
+  }
+
+  getDayType(dateKey) {
+    return this.data.dayTypes[dateKey] || "normal";
+  }
 }
 
 class ExpenseManager {
@@ -260,12 +289,13 @@ class StatsCalculator {
   getMonthStats(monthKey) {
     const currentKey = todayKey();
     const tickets = this.ticketManager.data.tickets
-      .filter(t => t.date.startsWith(monthKey) && t.date <= currentKey && this.ticketManager.isValid(t) && this.ticketManager.isMain(t));
+      .filter(t => t.date.startsWith(monthKey) && t.date <= currentKey && this.ticketManager.isValid(t))
+      .filter(t => (t.ticketType || "main") === "main");
     const expenses = this.expenseManager.getForMonth(monthKey);
 
     const totalKm = tickets.reduce((sum, t) => sum + Number(t.km || 375), 0);
     const totalMinutes = tickets.reduce((sum, t) => sum + calculateTrainDuration(t.dep, t.arr), 0);
-    const trainCost = tickets.reduce((sum, t) => sum + Number(t.price || 0), 0);
+    const trainCost = tickets.reduce((sum, t) => sum + getFixedTrainPrice(t), 0);
     const expenseCost = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
 
     return {

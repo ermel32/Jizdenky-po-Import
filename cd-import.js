@@ -79,6 +79,20 @@ class CDTakeoutImporter {
     const active = [...unique.values()].filter(t => !cancellations.has(t.doklad));
     const cancelled = [...unique.values()].filter(t => cancellations.has(t.doklad));
 
+    // Výchozí klasifikace: první jízdenka v každém směru daného dne je hlavní,
+    // další jízdenky stejného směru jsou pojistné. Ruční klasifikace se při
+    // dalších importech zachová.
+    const byDayDirection = new Map();
+    for (const ticket of active) {
+      const key = `${ticket.date}|${ticket.direction}`;
+      if (!byDayDirection.has(key)) byDayDirection.set(key, []);
+      byDayDirection.get(key).push(ticket);
+    }
+    for (const list of byDayDirection.values()) {
+      list.sort((a, b) => (a.dep || "").localeCompare(b.dep || ""));
+      list.forEach((ticket, index) => { ticket.ticketType = index === 0 ? "main" : "partial"; });
+    }
+
     const result = this.saveActiveTickets(active, cancellations);
 
     return {
@@ -158,16 +172,20 @@ class CDTakeoutImporter {
       source: "cd-takeout",
       status: "planned",
       direction: "outbound",
-      price: this.extractPrice(body),
+      price: 0,
       km: 375,
-      quiet: false,
+      quiet: this.detectQuiet(pdfText),
       ticketType: "main"
     };
 
     Object.assign(ticket, this.parseIcs(ics ? this.decodeBytes(ics.content) : ""));
     Object.assign(ticket, this.parsePdfFallback(pdfText));
 
+    ticket.train = normalizeTrainName(ticket.train);
+    ticket.quiet = this.detectQuiet(pdfText);
+
     ticket.direction = String(ticket.from || "").toLowerCase().includes("praha") ? "return" : "outbound";
+    ticket.price = getFixedTrainPrice(ticket);
     ticket.status = ticket.date && ticket.date < todayKey() ? "done" : "planned";
 
     if (!ticket.date || !ticket.train || !ticket.from || !ticket.to || !ticket.dep || !ticket.arr) {
@@ -248,16 +266,8 @@ class CDTakeoutImporter {
     const clean = text.replace(/\\n/g, "\n").replace(/\r/g, "");
     const lines = clean.split("\n");
     const get = prefix => {
-      const idx = lines.findIndex(l => l.startsWith(prefix));
-      if (idx === -1) return "";
-      const values = [];
-      for (let i = idx; i < lines.length && values.length < 8; i++) {
-        const line = lines[i];
-        if (i > idx && /^[A-Z][A-Z0-9-]*(?:;[^:]*)?:/.test(line)) break;
-        const value = i === idx ? line.slice(prefix.length).trim() : line.trim();
-        if (value) values.push(value);
-      }
-      return values.join(" / ");
+      const line = lines.find(l => l.startsWith(prefix));
+      return line ? line.slice(prefix.length).trim() : "";
     };
 
     const dtstart = (clean.match(/DTSTART(?:;[^:]+)?:([0-9]{8})T([0-9]{4,6})/) || []);
@@ -270,16 +280,16 @@ class CDTakeoutImporter {
     if (dtstart[2]) result.dep = `${dtstart[2].slice(0,2)}:${dtstart[2].slice(2,4)}`;
     if (dtend[2]) result.arr = `${dtend[2].slice(0,2)}:${dtend[2].slice(2,4)}`;
 
-    const normalizedDescription = description.replace(/\s*\/\s*/g, " / ").replace(/\s+/g, " ").trim();
-    const d = normalizedDescription.match(/^\s*(.*?)\s*\/\s*(.*?)\s+(\d{1,2}:\d{2})\s*\/\s*(.*?)\s+(\d{1,2}:\d{2})(?:\s*\/\s*vůz\s*([^,]+),\s*místo\s*(.+?))?\s*$/i);
+    // DESCRIPTION bývá např. "SC 516 / Bohumín 04:58 / Praha hl.n. 08:28 / vůz 1, místo 31".
+    const d = description.match(/^\s*(.*?)\s*\/\s*(.*?)\s+(\d{1,2}:\d{2})\s*\/\s*(.*?)\s+(\d{1,2}:\d{2})\s*\/\s*vůz\s*([^,]+),\s*místo\s*(.+?)\s*$/i);
     if (d) {
       result.train = d[1].trim();
       result.from = d[2].trim();
       result.dep = d[3];
       result.to = d[4].trim();
       result.arr = d[5];
-      if (d[6]) result.car = d[6].trim();
-      if (d[7]) result.seat = d[7].trim();
+      result.car = d[6].trim();
+      result.seat = d[7].trim();
     } else {
       const route = summary.match(/Cesta z\s+(.+?)\s+do\s+(.+)$/i);
       if (route) {
@@ -290,6 +300,14 @@ class CDTakeoutImporter {
 
     if (result.train) result.train = result.train.replace(/\s+/g, " ");
     return result;
+  }
+
+  detectQuiet(text) {
+    const clean = String(text || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    return /tiche\s+kupe|tichy\s+oddil|tiche\s+oddil|quiet\s+(?:compartment|coach|zone)|silent\s+(?:compartment|coach|zone)/i.test(clean);
   }
 
   parsePdfFallback(text) {
@@ -303,9 +321,6 @@ class CDTakeoutImporter {
     const date = clean.match(/(?:První den platnosti|First day of validity)\s*:?\s*(\d{2})[./](\d{2})[./](\d{4})/i) ||
                  clean.match(/\b(\d{2})[./](\d{2})[./](\d{4})\b/);
     if (date) result.date = `${date[3]}-${date[2]}-${date[1]}`;
-
-    // ČD PDF používá několik variant textu; zachytíme všechny běžné formulace tichého oddílu.
-    result.quiet = /tich(?:ý|y)\s+odd[ií]l|quiet\s+(?:car|coach|compartment)|ruhebereich/i.test(clean);
 
     return result;
   }
@@ -330,16 +345,30 @@ class CDTakeoutImporter {
     let addedCount = 0;
     let updatedCount = 0;
     let alreadyCount = 0;
+    let removedManualCancelledCount = 0;
 
-    // ČD jízdenky, které už mají v novém exportu storno, z aktuálního
-    // kalendáře odstraníme. Ručně přidaných vlaků se to vůbec nedotkne.
-    const before = this.app.data.tickets.length;
+    // ČD jízdenky, které mají v novém exportu skutečné storno, odstraníme.
     this.app.data.tickets = this.app.data.tickets.filter(ticket =>
       !(ticket.source === "cd-takeout" && ticket.doklad && cancellations.has(ticket.doklad))
     );
-    updatedCount += before - this.app.data.tickets.length;
 
-    // Odstraň i případné staré override záznamy, které by zůstaly po starší verzi importeru.
+    // Pokud uživatel jízdenku ručně stornoval, při dalším Gmail importu ji
+    // podle dokladu odstraníme také. Nový import ji tedy neobnoví.
+    const manualCancelledDocs = new Set();
+    for (const ticket of this.app.data.tickets) {
+      if (ticket.source === "cd-takeout" && ticket.doklad && this.app.ticketManager.isCancelled(ticket)) {
+        manualCancelledDocs.add(ticket.doklad);
+      }
+    }
+
+    if (manualCancelledDocs.size) {
+      const before = this.app.data.tickets.length;
+      this.app.data.tickets = this.app.data.tickets.filter(ticket =>
+        !(ticket.source === "cd-takeout" && ticket.doklad && manualCancelledDocs.has(ticket.doklad) && [...active].some(t => t.doklad === ticket.doklad))
+      );
+      removedManualCancelledCount = before - this.app.data.tickets.length;
+    }
+
     for (const id of Object.keys(this.app.data.ticketStatusOverrides)) {
       const exists = this.app.data.tickets.some(t => t.id === id);
       if (!exists) delete this.app.data.ticketStatusOverrides[id];
@@ -348,26 +377,18 @@ class CDTakeoutImporter {
     for (const ticket of active) {
       const existing = this.app.data.tickets.find(t => t.source === "cd-takeout" && t.doklad === ticket.doklad);
       if (existing) {
-        const wasSame = ["date","train","from","to","dep","arr","car","seat","price"].every(k => String(existing[k] ?? "") === String(ticket[k] ?? ""));
-        if (this.app.ticketManager.isCancelled(existing)) {
-          delete this.app.data.ticketStatusOverrides[existing.id];
-          const preservedType = existing.ticketType || "main";
-          Object.assign(existing, ticket, { id: existing.id, source: "cd-takeout", ticketType: preservedType });
-          updatedCount++;
-        } else if (wasSame) {
-          alreadyCount++;
-        } else {
-          const preservedType = existing.ticketType || "main";
-          Object.assign(existing, ticket, { id: existing.id, source: "cd-takeout", ticketType: preservedType });
-          updatedCount++;
-        }
+        const oldType = existing.ticketType || "main";
+        const wasSame = ["date","train","from","to","dep","arr","car","seat","quiet"].every(k => String(existing[k] ?? "") === String(ticket[k] ?? ""));
+        Object.assign(existing, ticket, { id: existing.id, source: "cd-takeout", ticketType: oldType });
+        if (wasSame) alreadyCount++;
+        else updatedCount++;
       } else {
-        this.app.data.tickets.push({ id: uid("ticket"), ...ticket, source: "cd-takeout" });
+        this.app.data.tickets.push({ id: uid("ticket"), ...ticket, source: "cd-takeout", ticketType: ticket.ticketType || "main" });
         addedCount++;
       }
     }
 
     this.app.data.save();
-    return { addedCount, updatedCount, alreadyCount };
+    return { addedCount, updatedCount: updatedCount + removedManualCancelledCount, alreadyCount, removedManualCancelledCount };
   }
 }

@@ -604,123 +604,140 @@ header {
   }
 }
 
-/* ===== ETAPA A ===== */
-.calendar-day.planned-day {
-  background: rgba(88, 166, 255, .055);
-  border-color: rgba(88, 166, 255, .28);
-}
-
-.calendar-day.actual-day {
-  background: rgba(63, 185, 80, .07);
-  border-color: rgba(63, 185, 80, .36);
-}
-
-.calendar-day.planned-day:hover,
-.calendar-day.actual-day:hover {
-  background: #212833;
-}
-
-.calendar-trains {
+/* ===== ETAPA A / 2 – calendar & expense refinements ===== */
+.calendar-legend {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  gap: 14px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0 0 10px;
+}
+
+.calendar-day {
+  justify-content: flex-start;
+}
+
+.calendar-tickets {
   margin-top: 4px;
 }
 
-.calendar-main-ticket {
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-  min-width: 0;
-  font-size: 10.5px;
-  line-height: 1.25;
+.calendar-ticket.main-ticket {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 6px;
+  align-items: center;
+  border-left: 3px solid var(--accent);
+  font-size: 12px;
+  font-weight: 500;
 }
 
-.calendar-train-time {
+.calendar-ticket.main-ticket strong {
   font-weight: 700;
-  flex: 0 0 auto;
 }
 
-.calendar-train-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.calendar-quiet {
-  flex: 0 0 auto;
-}
-
-.calendar-more,
-.calendar-partials {
-  width: fit-content;
-  font-size: 9px;
+.calendar-ticket.main-ticket span:not(.quiet-calendar) {
   color: var(--muted);
-  background: rgba(255,255,255,.04);
-  border-radius: 4px;
-  padding: 1px 4px;
+  font-weight: 600;
 }
 
-.calendar-partials {
-  font-weight: 700;
-  color: var(--accent);
+.quiet-calendar,
+.quiet-mark {
+  font-size: 13px;
+  margin-left: 2px;
 }
 
-.dot-expense { background: var(--orange); }
+.calendar-ticket-more {
+  color: var(--muted);
+  font-size: 11px;
+  padding: 3px 5px;
+  margin-top: 1px;
+}
 
-.day-warning {
-  margin-top: 10px;
-  padding: 9px 10px;
-  border-radius: 8px;
-  background: rgba(210,153,34,.10);
-  border: 1px solid rgba(210,153,34,.30);
-  color: #e6c76a;
+.day-indicators {
+  min-height: 18px;
+}
+
+.day-state {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.day-state.executed {
+  color: #58a6ff;
+}
+
+.day-state.planned {
+  color: var(--muted);
+  font-size: 17px;
+}
+
+.day-state.homeoffice,
+.day-state.vacation {
   font-size: 13px;
 }
 
-.day-warning-badge,
-.day-real-badge {
-  font-size: 11px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  white-space: nowrap;
+.expense-mark {
+  color: var(--orange);
+  font-size: 18px;
+  line-height: 1;
 }
 
-.day-warning-badge {
-  color: #e6c76a;
-  background: rgba(210,153,34,.12);
-}
-
-.day-real-badge {
-  color: #56d364;
-  background: rgba(63,185,80,.12);
-}
-
-.ticket-type-label {
+.ticket-type-badge {
   display: inline-block;
   margin-left: 5px;
   padding: 2px 5px;
   border-radius: 4px;
   font-size: 9px;
   vertical-align: middle;
-  color: var(--muted);
-  background: rgba(255,255,255,.05);
+  background: rgba(63, 185, 80, .12);
+  color: #56d364;
 }
 
-.ticket-type-main {
-  color: #56d364;
-  background: rgba(63,185,80,.09);
+.ticket-partial .ticket-type-badge {
+  background: rgba(210, 153, 34, .12);
+  color: #d29922;
 }
 
 .ticket-partial {
   opacity: .88;
 }
 
-@media (max-width: 500px) {
-  .calendar-main-ticket {
-    font-size: 9px;
-  }
-  .calendar-train-name {
-    max-width: 75px;
-  }
+.daily-total {
+  margin-left: 8px;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.expense-summary-list {
+  margin-top: 4px;
+}
+
+.expense-summary-row {
+  font-size: 14px;
+}
+
+.expense-detail {
+  color: var(--muted);
+  margin-left: 7px;
+  font-size: 13px;
+}
+
+.expense-details {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.expense-details summary {
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+
+.day-vacation {
+  border-color: rgba(210, 153, 34, .45);
+}
+
+.day-homeoffice {
+  border-color: rgba(88, 166, 255, .35);
 }

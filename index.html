@@ -85,16 +85,22 @@
   <div class="modal">
     <h2>Nový výdaj</h2>
     <div class="quick-expenses">
-      <button type="button" class="quick-expense-btn" data-desc="☕ Káva" data-amount="30">☕ Káva</button>
-      <button type="button" class="quick-expense-btn" data-desc="🍽️ Oběd" data-amount="160">🍽️ Oběd</button>
-      <button type="button" class="quick-expense-btn" data-desc="🍺 Pivo" data-amount="50">🍺 Pivo</button>
-      <button type="button" class="quick-expense-btn" data-desc="🚕 Taxi" data-amount="120">🚕 Taxi</button>
-      <button type="button" class="quick-expense-btn" data-desc="🅿️ Parkování" data-amount="100">🅿️ Parkování</button>
-      <button type="button" class="quick-expense-btn" data-desc="📦 Jiný výdaj" data-amount="">📦 Jiný</button>
+      <button type="button" class="quick-expense-btn" data-desc="🚇 Lítačka – 30 min" data-amount="36" data-category="litacka" data-subtype="30 min">🚇 30 min · 36 Kč</button>
+      <button type="button" class="quick-expense-btn" data-desc="🚇 Lítačka – 90 min" data-amount="46" data-category="litacka" data-subtype="90 min">🚇 90 min · 46 Kč</button>
+      <button type="button" class="quick-expense-btn" data-desc="🚇 Lítačka – 24 h" data-amount="140" data-category="litacka" data-subtype="24 h">🚇 24 h · 140 Kč</button>
+      <button type="button" class="quick-expense-btn" data-desc="🚌 ČSAD jízdné" data-amount="20" data-category="csad" data-subtype="jízdenka">🚌 ČSAD · 20 Kč</button>
+      <button type="button" class="quick-expense-btn" data-desc="☕ Káva" data-amount="30" data-category="other">☕ Káva</button>
+      <button type="button" class="quick-expense-btn" data-desc="🍽️ Oběd" data-amount="160" data-category="other">🍽️ Oběd</button>
+      <button type="button" class="quick-expense-btn" data-desc="🍺 Pivo" data-amount="50" data-category="other">🍺 Pivo</button>
+      <button type="button" class="quick-expense-btn" data-desc="🚕 Taxi" data-amount="120" data-category="other">🚕 Taxi</button>
+      <button type="button" class="quick-expense-btn" data-desc="🅿️ Parkování" data-amount="100" data-category="other">🅿️ Parkování</button>
+      <button type="button" class="quick-expense-btn" data-desc="📦 Jiný výdaj" data-amount="" data-category="other">📦 Jiný</button>
     </div>
     <form id="expenseForm">
       <div class="form-grid">
         <div class="form-group"><label>Datum</label><input id="expenseDate" type="date" required></div>
+        <div class="form-group"><label>Typ výdaje</label><select id="expenseCategory"><option value="other">Jiný výdaj</option><option value="litacka">🚇 Lítačka</option><option value="csad">🚌 ČSAD</option></select></div>
+        <div class="form-group"><label>Typ Lítačky</label><select id="expenseSubtype"><option value="">—</option><option value="30 min">30 min · 36 Kč</option><option value="90 min">90 min · 46 Kč</option><option value="24 h">24 h · 140 Kč</option></select></div>
         <div class="form-group"><label>Částka (Kč)</label><input id="expenseAmount" type="number" min="0" required></div>
         <div class="form-group full"><label>Popis / Kategorie</label><input id="expenseDescription" placeholder="Např. káva, oběd..." required></div>
       </div>
