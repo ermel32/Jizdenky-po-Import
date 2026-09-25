@@ -6,6 +6,7 @@
   <title>Můj pracovní den – Praha</title>
   <link rel="stylesheet" href="styles.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.2/dist/jszip.min.js"></script>
 </head>
 <body>
 
@@ -17,7 +18,7 @@
     </div>
     <div class="header-actions">
       <button class="btn" id="btnExport">⬇ Export</button>
-      <button class="btn btn-primary" id="btnImport">⬆ Import (PDF / Text)</button>
+      <button class="btn btn-primary" id="btnImport">⬆ Import</button>
     </div>
   </header>
 
@@ -34,11 +35,11 @@
 
 <div id="universalImportModal" class="modal-backdrop">
   <div class="modal" style="width:min(600px, 100%)">
-    <h2>⬆️ Import výpisu nebo dat</h2>
-    <p class="muted">Vyberte PDF soubor s výpisem z Air Bank, nebo vložte text.</p>
+    <h2>⬆️ Import dat</h2>
+    <p class="muted">PDF / Text pro výpisy a <strong>ČD Google Takeout (.ZIP)</strong> pro jízdenky z Gmailu.</p>
     <div class="form-group" style="margin-bottom:12px;">
-      <label>Vybrat soubor (PDF výpis z banky nebo JSON záloha)</label>
-      <input type="file" id="importFileInput" accept=".pdf,.txt,.json" style="padding:6px">
+      <label>Vybrat soubor</label>
+      <input type="file" id="importFileInput" accept=".zip,.pdf,.txt,.json" style="padding:6px">
     </div>
     <div class="form-group full" style="margin-bottom:12px;">
       <label>Nebo vložte text z výpisu sem</label>
@@ -106,6 +107,7 @@
 
 <script src="storage.js"></script>
 <script src="components.js"></script>
+<script src="cd-import.js"></script>
 <script src="app.js"></script>
 
 </body>

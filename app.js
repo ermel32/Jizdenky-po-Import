@@ -15,6 +15,8 @@ class App {
     this.currentView = "month";
     this.selectedDate = todayKey();
     this.calendarDate = new Date();
+    this.pendingImportFile = null;
+    this.cdImporter = new CDTakeoutImporter(this);
 
     this.setupPDF();
     this.setupEventListeners();
@@ -298,6 +300,7 @@ class App {
   openImportModal() {
     document.getElementById("importTextArea").value = "";
     document.getElementById("importFileInput").value = "";
+    this.pendingImportFile = null;
     document.getElementById("universalImportModal").classList.add("show");
   }
 
@@ -308,6 +311,14 @@ class App {
   async handleFileImport(e) {
     const file = e.target.files[0];
     if (!file) return;
+
+    this.pendingImportFile = file;
+
+    if (file.name.toLowerCase().endsWith(".zip")) {
+      document.getElementById("importTextArea").value =
+        `Vybrán ČD Google Takeout ZIP: ${file.name}\n\nPo kliknutí na „Zpracovat a importovat“ aplikace ZIP sama rozbalí, projde ČD e-maily, spáruje storna a přidá pouze aktuální jízdenky.`;
+      return;
+    }
 
     if (file.type === "application/json" || file.name.endsWith(".json")) {
       const reader = new FileReader();
@@ -357,19 +368,55 @@ class App {
     reader.readAsText(file);
   }
 
-        processImport() {
-    const text = document.getElementById("importTextArea").value.trim();
+  async processImport() {
+    // ČD Google Takeout ZIP – zpracovává se přímo jako archiv, ne jako text.
+    if (this.pendingImportFile && this.pendingImportFile.name.toLowerCase().endsWith(".zip")) {
+      const btn = document.getElementById("btnProcessImport");
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Zpracovávám ČD ZIP…";
 
+      try {
+        const result = await this.cdImporter.importZip(this.pendingImportFile);
+        this.render();
+        this.closeImportModal();
+
+        const errors = result.errors.length
+          ? `\n\n⚠️ Chyby: ${result.errors.slice(0, 5).join(" | ")}${result.errors.length > 5 ? " …" : ""}`
+          : "";
+
+        alert(
+          `ČD import dokončen.\n\n` +
+          `E-mailů: ${result.messageCount}\n` +
+          `Nákupních zpráv: ${result.purchaseCount}\n` +
+          `Storen: ${result.cancellationCount}\n` +
+          `Unikátních jízdenek: ${result.uniquePurchaseCount}\n` +
+          `Aktuálně platných: ${result.activeCount}\n` +
+          `Přidáno nových: ${result.addedCount}\n` +
+          `Aktualizováno: ${result.updatedCount}\n` +
+          `Již existovalo: ${result.alreadyCount}\n` +
+          `Storno bez odpovídajícího nákupu: ${result.unmatchedCancellationCount}` +
+          errors
+        );
+      } catch (err) {
+        console.error("ČD import:", err);
+        alert(`ČD ZIP se nepodařilo zpracovat.\n\n${err.message || err}`);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+      return;
+    }
+
+    const text = document.getElementById("importTextArea").value.trim();
     if (!text) {
       alert("Není zde žádný text k zpracování.");
       return;
     }
 
     try {
-      // JSON záloha
       if (text.startsWith("{") || text.startsWith("[")) {
         const data = JSON.parse(text);
-
         if (data.tickets && confirm("Import nahradí současná data. Pokračovat?")) {
           this.data.import(data);
           this.render();
@@ -379,222 +426,59 @@ class App {
         }
       }
 
-      // --------------------------------------------------
-      // AIR BANK PDF
-      // PID LÍTAČKA + ČSAD KARVINÁ
-      // --------------------------------------------------
+      // PARSE AIR BANK / PID
+      const lines = text.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+      let addedCount = 0;
+      let currentDate = null;
 
-      const lines = text
-        .split(/\r?\n/)
-        .map(line => line.trim())
-        .filter(line => line.length > 0);
-
-      const dateRegex = /^(\d{2})\.(\d{2})\.(\d{4})/;
-
-      // PDF částku vrací např.:
-      // -46,00 0,00
-      // -20,00 0,00
-      // -40,00 0,00
-      const amountRegex = /-\s*(\d+(?:[ .]\d{3})*(?:[,.]\d{1,2}))/;
-
-      const transactions = [];
+      const regexDatum = /^(\d{2})\.(\d{2})\.(\d{4})/;
+      const regexCastka = /^(-?\d+(?:[,\.]\d{1,2})?)\s*(?:Kč|CZK)?$/i;
 
       for (let i = 0; i < lines.length; i++) {
-
-        const dateMatch = lines[i].match(dateRegex);
-
-        if (!dateMatch) {
+        const line = lines[i];
+        const dateMatch = line.match(regexDatum);
+        if (dateMatch) {
+          currentDate = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
           continue;
         }
 
-        const currentDate =
-          `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+        const cleanLine = line.toLowerCase().replace(/\s+/g, "");
+        const isLitacka = cleanLine.includes("pid") || cleanLine.includes("litacka");
 
-        // Najdeme konec této konkrétní transakce.
-        let end = i + 1;
-
-        while (
-          end < lines.length &&
-          !dateRegex.test(lines[end])
-        ) {
-          end++;
+        if (isLitacka && currentDate) {
+          for (let j = i + 1; j <= Math.min(lines.length - 1, i + 5); j++) {
+            const amountMatch = lines[j].match(regexCastka);
+            if (amountMatch) {
+              let amount = parseFloat(amountMatch[1].replace(",", "."));
+              if (amount < 0) amount = Math.abs(amount);
+              if (amount > 0 && amount < 10000) {
+                const exists = this.expenseManager.data.expenses.some(e =>
+                  e.date === currentDate && e.amount === amount && e.description.includes("PID")
+                );
+                if (!exists) {
+                  this.expenseManager.add({
+                    date: currentDate,
+                    amount: amount,
+                    description: "PID Lítačka jízdné"
+                  });
+                  addedCount++;
+                }
+                break;
+              }
+            }
+          }
         }
-
-        // Celý blok jedné transakce
-        const block = lines
-          .slice(i, end)
-          .join(" ");
-
-        const normalizedBlock = block
-          .toLowerCase()
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .replace(/\s+/g, "");
-
-        // ------------------------------------------------
-        // URČENÍ TYPU VÝDAJE
-        // ------------------------------------------------
-
-        let description = null;
-
-        // PID LÍTAČKA
-        if (
-          normalizedBlock.includes("pidlitacka") ||
-          normalizedBlock.includes("litacka")
-        ) {
-          description = "PID Lítačka jízdné";
-        }
-
-        // ČSAD KARVINÁ
-        else if (
-          normalizedBlock.includes("csadhavi") ||
-          normalizedBlock.includes("csadkarv") ||
-          normalizedBlock.includes("csadkarvina")
-        ) {
-          description = "MHD Karviná – ČSAD";
-        }
-
-        // Pokud transakci neznáme, přeskočíme ji.
-        if (!description) {
-          i = end - 1;
-          continue;
-        }
-
-        // ------------------------------------------------
-        // ČÁSTKA
-        // ------------------------------------------------
-
-        const amountMatch = block.match(amountRegex);
-
-        if (!amountMatch) {
-          i = end - 1;
-          continue;
-        }
-
-        const amount = Number(
-          amountMatch[1]
-            .replace(/\s/g, "")
-            .replace(/\./g, "")
-            .replace(",", ".")
-        );
-
-        if (
-          !Number.isFinite(amount) ||
-          amount <= 0 ||
-          amount >= 10000
-        ) {
-          i = end - 1;
-          continue;
-        }
-
-        transactions.push({
-          date: currentDate,
-          amount: amount,
-          description: description
-        });
-
-        // Přeskočíme celý blok této transakce.
-        i = end - 1;
       }
 
-      if (transactions.length === 0) {
-        alert(
-          "V PDF nebyla nalezena žádná podporovaná platba Lítačky nebo ČSAD."
-        );
-        return;
-      }
-
-      // --------------------------------------------------
-      // OCHRANA PROTI DUPLICITÁM
-      // --------------------------------------------------
-
-      // Stejně jako předtím:
-      // datum + částka není dostatečný identifikátor,
-      // protože dvě stejné platby ve stejný den mohou
-      // být dvě skutečné transakce.
-
-      const occurrence = {};
-
-      let addedCount = 0;
-      let skippedCount = 0;
-
-      for (const transaction of transactions) {
-
-        const baseKey =
-          `${transaction.date}|` +
-          `${transaction.amount}|` +
-          `${transaction.description}`;
-
-        occurrence[baseKey] =
-          (occurrence[baseKey] || 0) + 1;
-
-        const importKey =
-          `pdf|${baseKey}|${occurrence[baseKey]}`;
-
-        const exists =
-          this.expenseManager.data.expenses.some(
-            e => e.importKey === importKey
-          );
-
-        if (exists) {
-          skippedCount++;
-          continue;
-        }
-
-        this.expenseManager.add({
-          date: transaction.date,
-          amount: transaction.amount,
-          description: transaction.description,
-          source: "pdf",
-          importKey: importKey
-        });
-
-        addedCount++;
-      }
-
+      alert(`Úspěšně importováno ${addedCount} plateb PID Lítačky.`);
       this.render();
       this.closeImportModal();
-
-      // --------------------------------------------------
-      // VÝSLEDEK
-      // --------------------------------------------------
-
-      const litackaCount = transactions.filter(
-        t => t.description === "PID Lítačka jízdné"
-      ).length;
-
-      const csadCount = transactions.filter(
-        t => t.description === "MHD Karviná – ČSAD"
-      ).length;
-
-      if (addedCount === 0 && skippedCount > 0) {
-
-        alert(
-          `Tento výpis už byl importován.\n\n` +
-          `Lítačka: ${litackaCount}\n` +
-          `ČSAD Karviná: ${csadCount}\n\n` +
-          `Nové platby: 0\n` +
-          `Přeskočené duplicity: ${skippedCount}`
-        );
-
-      } else {
-
-        alert(
-          `Import dokončen.\n\n` +
-          `🚌 Lítačka: ${litackaCount}\n` +
-          `🚌 ČSAD Karviná: ${csadCount}\n\n` +
-          `Celkem přidáno: ${addedCount}` +
-          (skippedCount > 0
-            ? `\nPřeskočené duplicity: ${skippedCount}`
-            : "")
-        );
-      }
-
     } catch (err) {
       console.error(err);
       alert("Chyba při zpracování importu.");
     }
   }
+
   exportData() {
     const blob = new Blob([JSON.stringify(this.data.export(), null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
