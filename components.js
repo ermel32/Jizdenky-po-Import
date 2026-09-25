@@ -69,6 +69,7 @@ class DayDetailRenderer {
             <button class="btn ${dayType === "normal" ? "btn-primary" : ""}" data-action="set-day-type" data-date="${dateKey}" data-type="normal">🏢 Praha / běžný den</button>
             <button class="btn ${dayType === "homeoffice" ? "btn-primary" : ""}" data-action="set-day-type" data-date="${dateKey}" data-type="homeoffice">🏠 HO</button>
             <button class="btn ${dayType === "vacation" ? "btn-primary" : ""}" data-action="set-day-type" data-date="${dateKey}" data-type="vacation">🏖️ Dovolená</button>
+            <button class="btn ${dayType === "sick" ? "btn-primary" : ""}" data-action="set-day-type" data-date="${dateKey}" data-type="sick">🤒 Sick Day</button>
           </div>
           ${dayType === "normal" ? `
             <div class="plan-toggle" style="margin-top:8px;">
@@ -158,7 +159,7 @@ class CalendarRenderer {
 
   render(year, month) {
     const monthName = new Date(year, month).toLocaleDateString("cs-CZ", { month: "long", year: "numeric" });
-    let html = `<div class="panel"><div class="calendar-header"><button data-action="prev-month">‹</button><div class="calendar-title">${monthName}</div><button data-action="next-month">›</button></div><div class="calendar-legend"><span class="legend-praha">✓ Praha</span><span>🏠 HO</span><span>🏖️ dovolená</span><span>• výdaj</span></div><div class="calendar-grid">
+    let html = `<div class="panel"><div class="calendar-header"><button data-action="prev-month">‹</button><div class="calendar-title">${monthName}</div><button data-action="next-month">›</button></div><div class="calendar-legend"><span>🏠 HO</span><span>🏖️ dovolená</span><span>🤒 Sick Day</span></div><div class="calendar-grid">
       <div class="calendar-weekday">Po</div><div class="calendar-weekday">Út</div><div class="calendar-weekday">St</div><div class="calendar-weekday">Čt</div><div class="calendar-weekday">Pá</div><div class="calendar-weekday weekend">So</div><div class="calendar-weekday weekend">Ne</div>`;
 
     let firstDay = new Date(year, month, 1).getDay();
@@ -191,8 +192,7 @@ class CalendarRenderer {
       let stateMark = "";
       if (dayType === "vacation") stateMark = `<span class="day-state vacation" title="Dovolená">🏖️ DOVOLENÁ</span>`;
       else if (dayType === "homeoffice") stateMark = `<span class="day-state homeoffice" title="Home office">🏠 HO</span>`;
-      else if (executedMainTickets.length) stateMark = `<span class="day-state executed" title="Praha uskutečněna">✓</span>`;
-      if (hasExpense) stateMark += `<span class="expense-mark" title="Výdaj">•</span>`;
+      else if (dayType === "sick") stateMark = `<span class="day-state sick" title="Sick Day">🤒 SICK DAY</span>`;
 
       html += `<div class="calendar-day ${isToday ? "today" : ""} ${isWeekend ? "weekend" : ""} ${dayType !== "normal" ? `day-${dayType}` : ""} ${executedMainTickets.length ? "day-executed" : ""}" data-action="select-day" data-date="${key}">
         <div class="calendar-number"><span>${day}</span><div class="day-indicators">${stateMark}</div></div>

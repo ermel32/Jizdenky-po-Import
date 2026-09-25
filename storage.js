@@ -2,6 +2,31 @@
 
 const STORAGE_KEY = "muj_pracovni_den_v8";
 
+// Automatické rozdělení ČD jízdenek na hlavní a pojistné/částečné:
+// na jeden den jsou první dvě časově seřazené ČD jízdenky hlavní, další jsou pojistné.
+// Jakmile uživatel typ ručně změní, označíme jej jako ruční a automatika do něj nesahá.
+function normalizeImportedTicketTypes(tickets) {
+  const groups = new Map();
+  for (const ticket of tickets) {
+    if (ticket?.source !== "cd-takeout" || !ticket?.date) continue;
+    if (!groups.has(ticket.date)) groups.set(ticket.date, []);
+    groups.get(ticket.date).push(ticket);
+  }
+
+  for (const group of groups.values()) {
+    if (group.some(t => t.ticketTypeManual)) continue;
+    if (group.some(t => t.ticketType === "partial")) continue;
+    if (group.length <= 2) {
+      group.forEach(t => { if (!t.ticketType) t.ticketType = "main"; });
+      continue;
+    }
+    group.sort((a, b) => String(a.dep || "").localeCompare(String(b.dep || "")));
+    group.forEach((t, index) => {
+      t.ticketType = index < 2 ? "main" : "partial";
+    });
+  }
+}
+
 class AppData {
   constructor() {
     this.tickets = [];
@@ -22,12 +47,14 @@ class AppData {
       if (data.workPlans) this.workPlans = data.workPlans;
       if (data.dayTypes) this.dayTypes = data.dayTypes;
       if (Array.isArray(data.expenses)) this.expenses = data.expenses;
+      normalizeImportedTicketTypes(this.tickets);
     } catch (error) {
       console.error("Chyba načítání dat:", error);
     }
   }
 
   save() {
+    normalizeImportedTicketTypes(this.tickets);
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       tickets: this.tickets,
       ticketStatusOverrides: this.ticketStatusOverrides,

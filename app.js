@@ -154,13 +154,14 @@ class App {
     let monthPlannedCount = 0;
     let monthHOCount = 0;
     let monthVacationCount = 0;
+    let monthSickCount = 0;
     const days = daysInMonth(this.calendarDate.getFullYear(), this.calendarDate.getMonth());
 
     for (let day = 1; day <= days; day++) {
       const key = keyFromDate(this.calendarDate.getFullYear(), this.calendarDate.getMonth(), day);
-      if (key > currentKey) continue;
       const type = this.workPlanManager.getDayType(key);
       if (type === "vacation") { monthVacationCount++; continue; }
+      if (type === "sick") { monthSickCount++; continue; }
       if (type === "homeoffice") { monthHOCount++; continue; }
       if (this.workPlanManager.isPlanned(key)) monthPlannedCount++;
       const mainTickets = this.ticketManager.getForDate(key)
@@ -169,12 +170,17 @@ class App {
       if (mainTickets.length > 0) monthExecutedCount++;
     }
 
-    // HO plán se vztahuje k celému vybranému měsíci, ne jen k již uplynulým dnům.
-    const workdays = Array.from({length: days}, (_, i) => i + 1).filter(day => {
+    // HO se počítá z pracovních dnů po odečtení dovolené a Sick Day.
+    let eligibleWorkdays = 0;
+    for (let day = 1; day <= days; day++) {
+      const key = keyFromDate(this.calendarDate.getFullYear(), this.calendarDate.getMonth(), day);
       const d = new Date(this.calendarDate.getFullYear(), this.calendarDate.getMonth(), day);
-      return d.getDay() !== 0 && d.getDay() !== 6;
-    }).length;
-    const expectedHO = Math.round(workdays * 0.20);
+      if (d.getDay() === 0 || d.getDay() === 6) continue;
+      const type = this.workPlanManager.getDayType(key);
+      if (type === "vacation" || type === "sick") continue;
+      eligibleWorkdays++;
+    }
+    const expectedHO = Math.round(eligibleWorkdays * 0.20);
 
     const statsHtml = `
       <div class="panel">
@@ -193,6 +199,7 @@ class App {
           <div class="stat-card"><div class="big">${money(stats.expenseCost)}</div><div class="small">ostatní výdaje</div></div>
           <div class="stat-card"><div class="big">${monthHOCount} / ${expectedHO}</div><div class="small">HO · skutečnost / plán 20 %</div></div>
           <div class="stat-card"><div class="big">${monthVacationCount}</div><div class="small">dny dovolené</div></div>
+          <div class="stat-card"><div class="big">${monthSickCount}</div><div class="small">Sick Day</div></div>
         </div>
       </div>
     `;
@@ -244,7 +251,8 @@ class App {
       seat: document.getElementById("ticketSeat").value.trim(),
       price: 0,
       km: Number(document.getElementById("ticketKm").value || 375),
-      quiet: document.getElementById("ticketQuiet").checked
+      quiet: document.getElementById("ticketQuiet").checked,
+      ticketTypeManual: true
     };
     data.price = data.ticketType === "main" ? getFixedTrainPrice({ ...data, price: Number(document.getElementById("ticketPrice").value || 0) }) : 0;
 
