@@ -11,6 +11,10 @@ class DayDetailRenderer {
     const tickets = this.ticketManager.getForDate(dateKey);
     const expenses = this.expenseManager.getForDate(dateKey);
     const isPlanned = this.workPlanManager.isPlanned(dateKey);
+    const mainTickets = tickets.filter(t => this.ticketManager.isMain(t) && this.ticketManager.isValid(t));
+    const hasMain = mainTickets.length > 0;
+    const hasDoneMain = mainTickets.some(t => this.ticketManager.getStatus(t) === "done");
+    const missingMain = isPlanned && !hasMain;
     const expenseCost = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
 
     return `
@@ -20,6 +24,7 @@ class DayDetailRenderer {
             <h2>${escapeHtml(fmtDate(dateKey))}</h2>
             <div class="muted">Detail pracovního dne</div>
           </div>
+          ${missingMain ? `<span class="day-warning-badge">⚠️ Chybí hlavní jízdenka</span>` : hasDoneMain ? `<span class="day-real-badge">Proběhlo</span>` : ""}
         </div>
 
         <div class="day-section">
@@ -28,6 +33,7 @@ class DayDetailRenderer {
             <button class="btn ${!isPlanned ? 'btn-primary' : ''}" data-action="set-plan" data-date="${dateKey}" data-value="0">○ Neplánuji</button>
             <button class="btn ${isPlanned ? 'btn-primary' : ''}" data-action="set-plan" data-date="${dateKey}" data-value="1">● Plánuji Prahu</button>
           </div>
+          ${missingMain ? `<div class="day-warning">⚠️ Tento den je naplánovaný do Prahy, ale nemá hlavní jízdenku. Pojistná jízdenka sama nestačí.</div>` : ""}
         </div>
 
         <div class="day-section">
@@ -76,6 +82,7 @@ class DayDetailRenderer {
   renderTicket(ticket) {
     const cancelled = this.ticketManager.isCancelled(ticket);
     const status = this.ticketManager.getStatus(ticket);
+    const isPartial = this.ticketManager.isPartial(ticket);
     let statusHtml = "";
 
     if (cancelled) {
@@ -87,10 +94,10 @@ class DayDetailRenderer {
     }
 
     return `
-      <div class="ticket ${cancelled ? "cancelled" : ""}">
+      <div class="ticket ${cancelled ? "cancelled" : ""} ${isPartial ? "ticket-partial" : ""}">
         <div class="ticket-head">
           <div>
-            <div class="train-name">${escapeHtml(ticket.train)}</div>
+            <div class="train-name">${escapeHtml(ticket.train)} ${isPartial ? `<span class="ticket-type-label">POJISTNÁ</span>` : `<span class="ticket-type-label ticket-type-main">HLAVNÍ</span>`}</div>
             <div class="route">${escapeHtml(ticket.from)} → ${escapeHtml(ticket.to)}</div>
             <div class="time">${escapeHtml(ticket.dep)} → ${escapeHtml(ticket.arr)} (${ticket.km || 0} km)</div>
           </div>
@@ -99,7 +106,7 @@ class DayDetailRenderer {
         <div class="ticket-meta">
           ${ticket.car ? `Vůz ${escapeHtml(ticket.car)}` : ""}
           ${ticket.seat ? `· místo ${escapeHtml(ticket.seat)}` : ""}
-          ${ticket.quiet ? `· 🔇 tichý oddíl` : ""}
+          ${ticket.quiet ? `· 🤫 tichý oddíl` : ""}
         </div>
         <div class="ticket-actions">
           ${cancelled ? `
@@ -132,21 +139,13 @@ class CalendarRenderer {
           <button data-action="next-month">›</button>
         </div>
         <div class="calendar-grid">
-          <div class="calendar-weekday">Po</div>
-          <div class="calendar-weekday">Út</div>
-          <div class="calendar-weekday">St</div>
-          <div class="calendar-weekday">Čt</div>
-          <div class="calendar-weekday">Pá</div>
-          <div class="calendar-weekday weekend">So</div>
-          <div class="calendar-weekday weekend">Ne</div>
+          <div class="calendar-weekday">Po</div><div class="calendar-weekday">Út</div><div class="calendar-weekday">St</div>
+          <div class="calendar-weekday">Čt</div><div class="calendar-weekday">Pá</div><div class="calendar-weekday weekend">So</div><div class="calendar-weekday weekend">Ne</div>
     `;
 
     let firstDay = new Date(year, month, 1).getDay();
     firstDay = firstDay === 0 ? 6 : firstDay - 1;
-
-    for (let i = 0; i < firstDay; i++) {
-      html += `<div class="calendar-day empty"></div>`;
-    }
+    for (let i = 0; i < firstDay; i++) html += `<div class="calendar-day empty"></div>`;
 
     const days = daysInMonth(year, month);
     const currentKey = todayKey();
@@ -157,25 +156,40 @@ class CalendarRenderer {
       const isWeekend = dObj.getDay() === 0 || dObj.getDay() === 6;
       const tickets = this.ticketManager.getForDate(key);
       const validTickets = tickets.filter(t => this.ticketManager.isValid(t));
+      const mainTickets = validTickets.filter(t => this.ticketManager.isMain(t));
+      const partialTickets = validTickets.filter(t => this.ticketManager.isPartial(t));
       const isPlanned = this.workPlanManager.isPlanned(key);
+      const isActual = mainTickets.some(t => this.ticketManager.getStatus(t) === "done");
       const isToday = key === currentKey;
       const hasExpense = this.expenseManager.getForDate(key).length > 0;
+      const missingMain = isPlanned && mainTickets.length === 0;
+      const visibleMain = mainTickets.slice(0, 2);
+      const extraMain = Math.max(0, mainTickets.length - visibleMain.length);
+
+      let dayClass = `calendar-day ${isToday ? "today" : ""} ${isWeekend ? "weekend" : ""}`;
+      if (isActual) dayClass += " actual-day";
+      else if (isPlanned) dayClass += " planned-day";
 
       html += `
-        <div class="calendar-day ${isToday ? "today" : ""} ${isWeekend ? "weekend" : ""}" data-action="select-day" data-date="${key}">
+        <div class="${dayClass}" data-action="select-day" data-date="${key}">
           <div class="calendar-number">
             <span>${day}</span>
             <div class="day-indicators">
-              ${isPlanned ? `<span class="dot dot-planned" title="Plán v Praze"></span>` : ""}
-              ${validTickets.length ? `<span class="dot dot-done" title="Jízdenka"></span>` : ""}
-              ${hasExpense ? `<span class="dot dot-warning" title="Výdaj"></span>` : ""}
+              ${hasExpense ? `<span class="dot dot-expense" title="Výdaj"></span>` : ""}
+              ${missingMain ? `<span class="dot dot-warning" title="Chybí hlavní jízdenka"></span>` : ""}
             </div>
           </div>
-          ${tickets.map(t => `
-            <div class="calendar-ticket ${this.ticketManager.isCancelled(t) ? "cancelled" : this.ticketManager.getStatus(t)}">
-              ${this.ticketManager.isCancelled(t) ? "× " : ""}${escapeHtml(t.train)}
-            </div>
-          `).join("")}
+          <div class="calendar-trains">
+            ${visibleMain.map(t => `
+              <div class="calendar-main-ticket" title="${escapeHtml(t.train)}">
+                <span class="calendar-train-time">${escapeHtml(t.dep || "")}</span>
+                <span class="calendar-train-name">${escapeHtml(t.train || "Vlak")}</span>
+                ${t.quiet ? `<span class="calendar-quiet" title="Tichý oddíl">🤫</span>` : ""}
+              </div>
+            `).join("")}
+            ${extraMain ? `<div class="calendar-more">+${extraMain} další</div>` : ""}
+            ${partialTickets.length ? `<div class="calendar-partials">+${partialTickets.length}</div>` : ""}
+          </div>
         </div>
       `;
     }

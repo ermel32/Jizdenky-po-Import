@@ -603,3 +603,124 @@ header {
     font-size: 9px;
   }
 }
+
+/* ===== ETAPA A ===== */
+.calendar-day.planned-day {
+  background: rgba(88, 166, 255, .055);
+  border-color: rgba(88, 166, 255, .28);
+}
+
+.calendar-day.actual-day {
+  background: rgba(63, 185, 80, .07);
+  border-color: rgba(63, 185, 80, .36);
+}
+
+.calendar-day.planned-day:hover,
+.calendar-day.actual-day:hover {
+  background: #212833;
+}
+
+.calendar-trains {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+}
+
+.calendar-main-ticket {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  font-size: 10.5px;
+  line-height: 1.25;
+}
+
+.calendar-train-time {
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+
+.calendar-train-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-quiet {
+  flex: 0 0 auto;
+}
+
+.calendar-more,
+.calendar-partials {
+  width: fit-content;
+  font-size: 9px;
+  color: var(--muted);
+  background: rgba(255,255,255,.04);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.calendar-partials {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.dot-expense { background: var(--orange); }
+
+.day-warning {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: rgba(210,153,34,.10);
+  border: 1px solid rgba(210,153,34,.30);
+  color: #e6c76a;
+  font-size: 13px;
+}
+
+.day-warning-badge,
+.day-real-badge {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.day-warning-badge {
+  color: #e6c76a;
+  background: rgba(210,153,34,.12);
+}
+
+.day-real-badge {
+  color: #56d364;
+  background: rgba(63,185,80,.12);
+}
+
+.ticket-type-label {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  vertical-align: middle;
+  color: var(--muted);
+  background: rgba(255,255,255,.05);
+}
+
+.ticket-type-main {
+  color: #56d364;
+  background: rgba(63,185,80,.09);
+}
+
+.ticket-partial {
+  opacity: .88;
+}
+
+@media (max-width: 500px) {
+  .calendar-main-ticket {
+    font-size: 9px;
+  }
+  .calendar-train-name {
+    max-width: 75px;
+  }
+}

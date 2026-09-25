@@ -60,6 +60,7 @@
       <div class="form-grid">
         <div class="form-group"><label>Datum</label><input id="ticketDate" type="date" required></div>
         <div class="form-group"><label>Stav</label><select id="ticketStatus"><option value="planned">Plán</option><option value="done">Uskutečněno</option></select></div>
+        <div class="form-group"><label>Typ jízdenky</label><select id="ticketType"><option value="main">Hlavní</option><option value="partial">Pojistná / částečná</option></select></div>
         <div class="form-group"><label>Vlak</label><input id="ticketTrain" required></div>
         <div class="form-group"><label>Směr</label><select id="ticketDirection"><option value="outbound">Bohumín → Praha</option><option value="return">Praha → Bohumín</option></select></div>
         <div class="form-group"><label>Odkud</label><input id="ticketFrom" required></div>
@@ -84,9 +85,9 @@
   <div class="modal">
     <h2>Nový výdaj</h2>
     <div class="quick-expenses">
-      <button type="button" class="quick-expense-btn" data-desc="☕ Káva" data-amount="60">☕ Káva</button>
-      <button type="button" class="quick-expense-btn" data-desc="🍽️ Oběd" data-amount="150">🍽️ Oběd</button>
-      <button type="button" class="quick-expense-btn" data-desc="🍺 Pivo" data-amount="80">🍺 Pivo</button>
+      <button type="button" class="quick-expense-btn" data-desc="☕ Káva" data-amount="30">☕ Káva</button>
+      <button type="button" class="quick-expense-btn" data-desc="🍽️ Oběd" data-amount="160">🍽️ Oběd</button>
+      <button type="button" class="quick-expense-btn" data-desc="🍺 Pivo" data-amount="50">🍺 Pivo</button>
       <button type="button" class="quick-expense-btn" data-desc="🚕 Taxi" data-amount="120">🚕 Taxi</button>
       <button type="button" class="quick-expense-btn" data-desc="🅿️ Parkování" data-amount="100">🅿️ Parkování</button>
       <button type="button" class="quick-expense-btn" data-desc="📦 Jiný výdaj" data-amount="">📦 Jiný</button>

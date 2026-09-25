@@ -149,6 +149,14 @@ class TicketManager {
     return !this.isCancelled(ticket);
   }
 
+  isMain(ticket) {
+    return (ticket.ticketType || "main") === "main";
+  }
+
+  isPartial(ticket) {
+    return (ticket.ticketType || "main") === "partial";
+  }
+
   setStatus(ticketId, status) {
     this.data.ticketStatusOverrides[ticketId] = status;
     this.data.save();
@@ -252,7 +260,7 @@ class StatsCalculator {
   getMonthStats(monthKey) {
     const currentKey = todayKey();
     const tickets = this.ticketManager.data.tickets
-      .filter(t => t.date.startsWith(monthKey) && t.date <= currentKey && this.ticketManager.isValid(t));
+      .filter(t => t.date.startsWith(monthKey) && t.date <= currentKey && this.ticketManager.isValid(t) && this.ticketManager.isMain(t));
     const expenses = this.expenseManager.getForMonth(monthKey);
 
     const totalKm = tickets.reduce((sum, t) => sum + Number(t.km || 375), 0);

@@ -153,8 +153,8 @@ class App {
       const key = keyFromDate(this.calendarDate.getFullYear(), this.calendarDate.getMonth(), day);
       if (key <= currentKey) {
         if (this.workPlanManager.isPlanned(key)) monthPlannedCount++;
-        const validTickets = this.ticketManager.getForDate(key).filter(t => this.ticketManager.isValid(t));
-        if (validTickets.length > 0) monthExecutedCount++;
+        const validMainTickets = this.ticketManager.getForDate(key).filter(t => this.ticketManager.isValid(t) && this.ticketManager.isMain(t));
+        if (validMainTickets.some(t => this.ticketManager.getStatus(t) === "done")) monthExecutedCount++;
       }
     }
 
@@ -206,6 +206,7 @@ class App {
     document.getElementById("editTicketId").value = ticket?.id || "";
     document.getElementById("ticketDate").value = ticket?.date || this.selectedDate;
     document.getElementById("ticketStatus").value = ticket?.status || "planned";
+    document.getElementById("ticketType").value = ticket?.ticketType || "main";
     document.getElementById("ticketTrain").value = ticket?.train || "";
     document.getElementById("ticketDirection").value = ticket?.direction || "outbound";
     document.getElementById("ticketFrom").value = ticket?.from || "";
@@ -230,6 +231,7 @@ class App {
     const data = {
       date: document.getElementById("ticketDate").value,
       status: document.getElementById("ticketStatus").value,
+      ticketType: document.getElementById("ticketType").value,
       train: document.getElementById("ticketTrain").value.trim(),
       direction: document.getElementById("ticketDirection").value,
       from: document.getElementById("ticketFrom").value.trim(),
@@ -393,7 +395,7 @@ class App {
           `ČD import dokončen.\n\n` +
           `E-mailů: ${result.messageCount}\n` +
           `Nákupních zpráv: ${result.purchaseCount}\n` +
-          `Storno zpráv: ${result.cancellationCount}\n` +
+          `Storen: ${result.cancellationCount}\n` +
           `Unikátních jízdenek: ${result.uniquePurchaseCount}\n` +
           `Aktuálně platných: ${result.activeCount}\n` +
           `Přidáno nových: ${result.addedCount}\n` +
@@ -449,22 +451,17 @@ class App {
         const currentDate = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
 
         let end = i + 1;
-        while (end < lines.length && !regexDatum.test(lines[end])) {
-          end++;
-        }
+        while (end < lines.length && !regexDatum.test(lines[end])) end++;
 
         const block = lines.slice(i, end).join(" ");
-        const cleanBlock = block
+        const normalized = block
           .toLowerCase()
           .normalize("NFD")
           .replace(/[\u0300-\u036f]/g, "")
           .replace(/\s+/g, "");
 
-        const isLitacka = cleanBlock.includes("pidlitacka") || cleanBlock.includes("litacka");
-        const isCsad = cleanBlock.includes("csad");
-
-        // Podporované dopravní výdaje z bankovního výpisu.
-        // Ostatní transakce zůstávají nedotčené.
+        const isLitacka = normalized.includes("pidlitacka") || normalized.includes("litacka");
+        const isCsad = normalized.includes("csad");
         if (!isLitacka && !isCsad) {
           i = end - 1;
           continue;
@@ -491,57 +488,59 @@ class App {
         transactions.push({
           date: currentDate,
           amount,
-          description: isCsad ? "ČSAD jízdné" : "PID Lítačka jízdné"
+          category: isCsad ? "csad" : "litacka",
+          description: isCsad ? "🚌 ČSAD" : "🚇 Lítačka"
         });
 
         i = end - 1;
       }
 
       if (transactions.length === 0) {
-        alert("V PDF nebyla nalezena žádná podporovaná platba PID Lítačky nebo ČSAD.");
+        alert("V PDF nebyla nalezena žádná podporovaná platba Lítačky nebo ČSAD.");
         return;
       }
 
       const importBatch = this.makeImportHash(
         transactions
-          .map(t => `${t.date}|${t.amount}|${t.description}`)
+          .map(t => `${t.date}|${t.amount}|${t.category}|${t.description}`)
           .join("\n")
       );
 
       const storedBatches = this.getStoredPdfImportBatches();
-
-      if (storedBatches.includes(importBatch)) {
-        alert("Tento výpis už byl do aplikace importován. Nebyly přidány žádné nové platby.");
-        this.closeImportModal();
-        return;
-      }
-
       let addedCount = 0;
+      let skippedCount = 0;
 
       for (const transaction of transactions) {
+        const exists = this.expenseManager.data.expenses.some(e =>
+          e.date === transaction.date &&
+          Number(e.amount) === Number(transaction.amount) &&
+          (e.category || "") === transaction.category
+        );
+        if (exists) {
+          skippedCount++;
+          continue;
+        }
+
         this.expenseManager.add({
           date: transaction.date,
           amount: transaction.amount,
           description: transaction.description,
+          category: transaction.category,
           source: "pdf",
           importBatch
         });
         addedCount++;
       }
 
-      storedBatches.push(importBatch);
-      this.savePdfImportBatches(storedBatches);
+      if (!storedBatches.includes(importBatch)) {
+        storedBatches.push(importBatch);
+        this.savePdfImportBatches(storedBatches);
+      }
 
       this.render();
       this.closeImportModal();
 
-      const litackaCount = transactions.filter(t => t.description === "PID Lítačka jízdné").length;
-      const csadCount = transactions.filter(t => t.description === "ČSAD jízdné").length;
-      alert(
-        `Úspěšně importováno ${addedCount} plateb.` +
-        `\n\nPID Lítačka: ${litackaCount}` +
-        `\nČSAD: ${csadCount}`
-      );
+      alert(`Import dokončen.\n\nPřidáno: ${addedCount}\nJiž existovalo: ${skippedCount}`);
     } catch (err) {
       console.error(err);
       alert("Chyba při zpracování importu.");

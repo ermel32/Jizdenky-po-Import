@@ -160,7 +160,8 @@ class CDTakeoutImporter {
       direction: "outbound",
       price: this.extractPrice(body),
       km: 375,
-      quiet: false
+      quiet: false,
+      ticketType: "main"
     };
 
     Object.assign(ticket, this.parseIcs(ics ? this.decodeBytes(ics.content) : ""));
@@ -204,7 +205,7 @@ class CDTakeoutImporter {
 
     const read = async (disableWorker) => {
       const loadingTask = pdfjsLib.getDocument({
-        data: bytes.slice(),
+        data: bytes,
         disableWorker: !!disableWorker,
         useWorkerFetch: false,
         isEvalSupported: false
@@ -244,73 +245,42 @@ class CDTakeoutImporter {
 
   parseIcs(text) {
     if (!text) return {};
-
-    // ČD v Google Takeoutu používá DESCRIPTION s escaped novými řádky:
-    // DESCRIPTION:SC 516\nBohumín 04:58\nPraha hl.n. 08:28\nvůz 1, místo 31
-    // Starší/jiný export může mít stejné údaje skutečně na více řádcích.
-    const clean = String(text)
-      .replace(/\r\n/g, "\n")
-      .replace(/\r/g, "\n")
-      .replace(/\n[ \t]/g, ""); // iCalendar line unfolding
-
+    const clean = text.replace(/\\n/g, "\n").replace(/\r/g, "");
+    const lines = clean.split("\n");
     const get = prefix => {
-      const line = clean.split("\n").find(l => l.startsWith(prefix));
-      return line ? line.slice(prefix.length).trim() : "";
+      const idx = lines.findIndex(l => l.startsWith(prefix));
+      if (idx === -1) return "";
+      const values = [];
+      for (let i = idx; i < lines.length && values.length < 8; i++) {
+        const line = lines[i];
+        if (i > idx && /^[A-Z][A-Z0-9-]*(?:;[^:]*)?:/.test(line)) break;
+        const value = i === idx ? line.slice(prefix.length).trim() : line.trim();
+        if (value) values.push(value);
+      }
+      return values.join(" / ");
     };
 
-    const dtstart = clean.match(/DTSTART(?:;[^:]+)?:([0-9]{8})T([0-9]{4,6})/);
-    const dtend = clean.match(/DTEND(?:;[^:]+)?:([0-9]{8})T([0-9]{4,6})/);
-    const summary = this.unescapeIcs(get("SUMMARY:"));
-    const rawDescription = get("DESCRIPTION:");
-    const description = this.unescapeIcs(rawDescription).replace(/\\n/g, "\n");
+    const dtstart = (clean.match(/DTSTART(?:;[^:]+)?:([0-9]{8})T([0-9]{4,6})/) || []);
+    const dtend = (clean.match(/DTEND(?:;[^:]+)?:([0-9]{8})T([0-9]{4,6})/) || []);
+    const summary = get("SUMMARY:");
+    const description = get("DESCRIPTION:").replace(/\\,/g, ",");
 
     const result = {};
-    if (dtstart) result.date = `${dtstart[1].slice(0,4)}-${dtstart[1].slice(4,6)}-${dtstart[1].slice(6,8)}`;
-    if (dtstart) result.dep = `${dtstart[2].slice(0,2)}:${dtstart[2].slice(2,4)}`;
-    if (dtend) result.arr = `${dtend[2].slice(0,2)}:${dtend[2].slice(2,4)}`;
+    if (dtstart[1]) result.date = `${dtstart[1].slice(0,4)}-${dtstart[1].slice(4,6)}-${dtstart[1].slice(6,8)}`;
+    if (dtstart[2]) result.dep = `${dtstart[2].slice(0,2)}:${dtstart[2].slice(2,4)}`;
+    if (dtend[2]) result.arr = `${dtend[2].slice(0,2)}:${dtend[2].slice(2,4)}`;
 
-    const descLines = description
-      .split(/\n/)
-      .map(s => s.trim())
-      .filter(Boolean);
-
-    // Aktuální ČD ICS: 4 řádky = vlak / odkud+odjezd / kam+příjezd / vůz+místo.
-    if (descLines.length >= 4) {
-      const routeFrom = descLines[1].match(/^(.*?)\s+(\d{1,2}:\d{2})$/);
-      const routeTo = descLines[2].match(/^(.*?)\s+(\d{1,2}:\d{2})$/);
-      const reservation = descLines[3].match(/^vůz\s+([^,]+),\s*místo\s+(.+)$/i);
-
-      result.train = descLines[0];
-      if (routeFrom) {
-        result.from = routeFrom[1].trim();
-        result.dep = routeFrom[2];
-      }
-      if (routeTo) {
-        result.to = routeTo[1].trim();
-        result.arr = routeTo[2];
-      }
-      if (reservation) {
-        result.car = reservation[1].trim();
-        result.seat = reservation[2].trim();
-      }
-    }
-
-    // Záloha pro případ staršího exportu s údaji v jednom řádku.
-    if (!result.train) {
-      const oneLine = description.replace(/\n/g, " / ");
-      const d = oneLine.match(/^\s*(.*?)\s*\/\s*(.*?)\s+(\d{1,2}:\d{2})\s*\/\s*(.*?)\s+(\d{1,2}:\d{2})\s*\/\s*vůz\s*([^,]+),\s*místo\s*(.+?)\s*$/i);
-      if (d) {
-        result.train = d[1].trim();
-        result.from = d[2].trim();
-        result.dep = d[3];
-        result.to = d[4].trim();
-        result.arr = d[5];
-        result.car = d[6].trim();
-        result.seat = d[7].trim();
-      }
-    }
-
-    if (!result.from || !result.to) {
+    const normalizedDescription = description.replace(/\s*\/\s*/g, " / ").replace(/\s+/g, " ").trim();
+    const d = normalizedDescription.match(/^\s*(.*?)\s*\/\s*(.*?)\s+(\d{1,2}:\d{2})\s*\/\s*(.*?)\s+(\d{1,2}:\d{2})(?:\s*\/\s*vůz\s*([^,]+),\s*místo\s*(.+?))?\s*$/i);
+    if (d) {
+      result.train = d[1].trim();
+      result.from = d[2].trim();
+      result.dep = d[3];
+      result.to = d[4].trim();
+      result.arr = d[5];
+      if (d[6]) result.car = d[6].trim();
+      if (d[7]) result.seat = d[7].trim();
+    } else {
       const route = summary.match(/Cesta z\s+(.+?)\s+do\s+(.+)$/i);
       if (route) {
         result.from = route[1].trim();
@@ -320,14 +290,6 @@ class CDTakeoutImporter {
 
     if (result.train) result.train = result.train.replace(/\s+/g, " ");
     return result;
-  }
-
-  unescapeIcs(value) {
-    return String(value || "")
-      .replace(/\\n/g, "\n")
-      .replace(/\\,/g, ",")
-      .replace(/\\;/g, ";")
-      .replace(/\\\\/g, "\\");
   }
 
   parsePdfFallback(text) {
@@ -341,6 +303,9 @@ class CDTakeoutImporter {
     const date = clean.match(/(?:První den platnosti|First day of validity)\s*:?\s*(\d{2})[./](\d{2})[./](\d{4})/i) ||
                  clean.match(/\b(\d{2})[./](\d{2})[./](\d{4})\b/);
     if (date) result.date = `${date[3]}-${date[2]}-${date[1]}`;
+
+    // ČD PDF používá několik variant textu; zachytíme všechny běžné formulace tichého oddílu.
+    result.quiet = /tich(?:ý|y)\s+odd[ií]l|quiet\s+(?:car|coach|compartment)|ruhebereich/i.test(clean);
 
     return result;
   }
@@ -386,12 +351,14 @@ class CDTakeoutImporter {
         const wasSame = ["date","train","from","to","dep","arr","car","seat","price"].every(k => String(existing[k] ?? "") === String(ticket[k] ?? ""));
         if (this.app.ticketManager.isCancelled(existing)) {
           delete this.app.data.ticketStatusOverrides[existing.id];
-          Object.assign(existing, ticket, { id: existing.id, source: "cd-takeout" });
+          const preservedType = existing.ticketType || "main";
+          Object.assign(existing, ticket, { id: existing.id, source: "cd-takeout", ticketType: preservedType });
           updatedCount++;
         } else if (wasSame) {
           alreadyCount++;
         } else {
-          Object.assign(existing, ticket, { id: existing.id, source: "cd-takeout" });
+          const preservedType = existing.ticketType || "main";
+          Object.assign(existing, ticket, { id: existing.id, source: "cd-takeout", ticketType: preservedType });
           updatedCount++;
         }
       } else {
