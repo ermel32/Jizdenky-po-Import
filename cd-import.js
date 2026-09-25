@@ -204,7 +204,7 @@ class CDTakeoutImporter {
 
     const read = async (disableWorker) => {
       const loadingTask = pdfjsLib.getDocument({
-        data: bytes,
+        data: bytes.slice(),
         disableWorker: !!disableWorker,
         useWorkerFetch: false,
         isEvalSupported: false
@@ -244,34 +244,73 @@ class CDTakeoutImporter {
 
   parseIcs(text) {
     if (!text) return {};
-    const clean = text.replace(/\\n/g, "\n").replace(/\r/g, "");
-    const lines = clean.split("\n");
+
+    // ČD v Google Takeoutu používá DESCRIPTION s escaped novými řádky:
+    // DESCRIPTION:SC 516\nBohumín 04:58\nPraha hl.n. 08:28\nvůz 1, místo 31
+    // Starší/jiný export může mít stejné údaje skutečně na více řádcích.
+    const clean = String(text)
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .replace(/\n[ \t]/g, ""); // iCalendar line unfolding
+
     const get = prefix => {
-      const line = lines.find(l => l.startsWith(prefix));
+      const line = clean.split("\n").find(l => l.startsWith(prefix));
       return line ? line.slice(prefix.length).trim() : "";
     };
 
-    const dtstart = (clean.match(/DTSTART(?:;[^:]+)?:([0-9]{8})T([0-9]{4,6})/) || []);
-    const dtend = (clean.match(/DTEND(?:;[^:]+)?:([0-9]{8})T([0-9]{4,6})/) || []);
-    const summary = get("SUMMARY:");
-    const description = get("DESCRIPTION:").replace(/\\,/g, ",");
+    const dtstart = clean.match(/DTSTART(?:;[^:]+)?:([0-9]{8})T([0-9]{4,6})/);
+    const dtend = clean.match(/DTEND(?:;[^:]+)?:([0-9]{8})T([0-9]{4,6})/);
+    const summary = this.unescapeIcs(get("SUMMARY:"));
+    const rawDescription = get("DESCRIPTION:");
+    const description = this.unescapeIcs(rawDescription).replace(/\\n/g, "\n");
 
     const result = {};
-    if (dtstart[1]) result.date = `${dtstart[1].slice(0,4)}-${dtstart[1].slice(4,6)}-${dtstart[1].slice(6,8)}`;
-    if (dtstart[2]) result.dep = `${dtstart[2].slice(0,2)}:${dtstart[2].slice(2,4)}`;
-    if (dtend[2]) result.arr = `${dtend[2].slice(0,2)}:${dtend[2].slice(2,4)}`;
+    if (dtstart) result.date = `${dtstart[1].slice(0,4)}-${dtstart[1].slice(4,6)}-${dtstart[1].slice(6,8)}`;
+    if (dtstart) result.dep = `${dtstart[2].slice(0,2)}:${dtstart[2].slice(2,4)}`;
+    if (dtend) result.arr = `${dtend[2].slice(0,2)}:${dtend[2].slice(2,4)}`;
 
-    // DESCRIPTION bývá např. "SC 516 / Bohumín 04:58 / Praha hl.n. 08:28 / vůz 1, místo 31".
-    const d = description.match(/^\s*(.*?)\s*\/\s*(.*?)\s+(\d{1,2}:\d{2})\s*\/\s*(.*?)\s+(\d{1,2}:\d{2})\s*\/\s*vůz\s*([^,]+),\s*místo\s*(.+?)\s*$/i);
-    if (d) {
-      result.train = d[1].trim();
-      result.from = d[2].trim();
-      result.dep = d[3];
-      result.to = d[4].trim();
-      result.arr = d[5];
-      result.car = d[6].trim();
-      result.seat = d[7].trim();
-    } else {
+    const descLines = description
+      .split(/\n/)
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    // Aktuální ČD ICS: 4 řádky = vlak / odkud+odjezd / kam+příjezd / vůz+místo.
+    if (descLines.length >= 4) {
+      const routeFrom = descLines[1].match(/^(.*?)\s+(\d{1,2}:\d{2})$/);
+      const routeTo = descLines[2].match(/^(.*?)\s+(\d{1,2}:\d{2})$/);
+      const reservation = descLines[3].match(/^vůz\s+([^,]+),\s*místo\s+(.+)$/i);
+
+      result.train = descLines[0];
+      if (routeFrom) {
+        result.from = routeFrom[1].trim();
+        result.dep = routeFrom[2];
+      }
+      if (routeTo) {
+        result.to = routeTo[1].trim();
+        result.arr = routeTo[2];
+      }
+      if (reservation) {
+        result.car = reservation[1].trim();
+        result.seat = reservation[2].trim();
+      }
+    }
+
+    // Záloha pro případ staršího exportu s údaji v jednom řádku.
+    if (!result.train) {
+      const oneLine = description.replace(/\n/g, " / ");
+      const d = oneLine.match(/^\s*(.*?)\s*\/\s*(.*?)\s+(\d{1,2}:\d{2})\s*\/\s*(.*?)\s+(\d{1,2}:\d{2})\s*\/\s*vůz\s*([^,]+),\s*místo\s*(.+?)\s*$/i);
+      if (d) {
+        result.train = d[1].trim();
+        result.from = d[2].trim();
+        result.dep = d[3];
+        result.to = d[4].trim();
+        result.arr = d[5];
+        result.car = d[6].trim();
+        result.seat = d[7].trim();
+      }
+    }
+
+    if (!result.from || !result.to) {
       const route = summary.match(/Cesta z\s+(.+?)\s+do\s+(.+)$/i);
       if (route) {
         result.from = route[1].trim();
@@ -281,6 +320,14 @@ class CDTakeoutImporter {
 
     if (result.train) result.train = result.train.replace(/\s+/g, " ");
     return result;
+  }
+
+  unescapeIcs(value) {
+    return String(value || "")
+      .replace(/\\n/g, "\n")
+      .replace(/\\,/g, ",")
+      .replace(/\\;/g, ";")
+      .replace(/\\\\/g, "\\");
   }
 
   parsePdfFallback(text) {

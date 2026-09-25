@@ -393,7 +393,7 @@ class App {
           `ČD import dokončen.\n\n` +
           `E-mailů: ${result.messageCount}\n` +
           `Nákupních zpráv: ${result.purchaseCount}\n` +
-          `Storen: ${result.cancellationCount}\n` +
+          `Storno zpráv: ${result.cancellationCount}\n` +
           `Unikátních jízdenek: ${result.uniquePurchaseCount}\n` +
           `Aktuálně platných: ${result.activeCount}\n` +
           `Přidáno nových: ${result.addedCount}\n` +
@@ -460,7 +460,12 @@ class App {
           .replace(/[\u0300-\u036f]/g, "")
           .replace(/\s+/g, "");
 
-        if (!cleanBlock.includes("pidlitacka") && !cleanBlock.includes("litacka")) {
+        const isLitacka = cleanBlock.includes("pidlitacka") || cleanBlock.includes("litacka");
+        const isCsad = cleanBlock.includes("csad");
+
+        // Podporované dopravní výdaje z bankovního výpisu.
+        // Ostatní transakce zůstávají nedotčené.
+        if (!isLitacka && !isCsad) {
           i = end - 1;
           continue;
         }
@@ -486,14 +491,14 @@ class App {
         transactions.push({
           date: currentDate,
           amount,
-          description: "PID Lítačka jízdné"
+          description: isCsad ? "ČSAD jízdné" : "PID Lítačka jízdné"
         });
 
         i = end - 1;
       }
 
       if (transactions.length === 0) {
-        alert("V PDF nebyla nalezena žádná platba PID Lítačky.");
+        alert("V PDF nebyla nalezena žádná podporovaná platba PID Lítačky nebo ČSAD.");
         return;
       }
 
@@ -530,7 +535,13 @@ class App {
       this.render();
       this.closeImportModal();
 
-      alert(`Úspěšně importováno ${addedCount} plateb PID Lítačky.`);
+      const litackaCount = transactions.filter(t => t.description === "PID Lítačka jízdné").length;
+      const csadCount = transactions.filter(t => t.description === "ČSAD jízdné").length;
+      alert(
+        `Úspěšně importováno ${addedCount} plateb.` +
+        `\n\nPID Lítačka: ${litackaCount}` +
+        `\nČSAD: ${csadCount}`
+      );
     } catch (err) {
       console.error(err);
       alert("Chyba při zpracování importu.");
