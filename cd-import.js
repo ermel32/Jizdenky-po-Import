@@ -115,21 +115,43 @@ class CDTakeoutImporter {
   }
 
   extractDoklad(text) {
-    // ČD doklad má tvar 51-xxxx-xxx, někdy před ním stojí hvězdička.
-    const m = String(text).match(/\*?\b(\d{2}-\d{4}-\d{3})\b/);
-    return m ? m[1] : "";
+    const normalized = String(text || "")
+      .replace(/\u00a0/g, " ")
+      .replace(/[\r\n]+/g, " ")
+      .replace(/\s+/g, " ");
+
+    const labelled = normalized.match(
+      /(?:Doklad\s*číslo|Document\s*no\.?|doklad)\s*[:#-]?\s*\*?\s*(\d{2}\s*-\s*\d{4}\s*-\s*\d{3})/i
+    );
+    if (labelled) return labelled[1].replace(/\s+/g, "");
+
+    const m = normalized.match(/\*?\b(\d{2}\s*-\s*\d{4}\s*-\s*\d{3})\b/);
+    return m ? m[1].replace(/\s+/g, "") : "";
   }
+
 
   async parsePurchase(email, body) {
     const attachments = email.attachments || [];
-    const pdf = attachments.find(a => /\.pdf$/i.test(a.filename || ""));
-    const ics = attachments.find(a => /\.ics$/i.test(a.filename || ""));
+    const pdf = attachments.find(a =>
+      /\.pdf$/i.test(a.filename || "") ||
+      /application\/pdf/i.test(a.mimeType || a.contentType || a.type || "")
+    );
+    const ics = attachments.find(a =>
+      /\.ics$/i.test(a.filename || "") ||
+      /text\/calendar/i.test(a.mimeType || a.contentType || a.type || "")
+    );
 
     let pdfText = "";
     if (pdf) pdfText = await this.extractPdfText(pdf.content);
 
     const doklad = this.extractDoklad(pdfText);
-    if (!doklad) throw new Error("PDF jízdenky neobsahuje rozpoznatelné číslo dokladu.");
+    if (!doklad) {
+      throw new Error(
+        "PDF jízdenky neobsahuje rozpoznatelné číslo dokladu" +
+        (pdf?.filename ? ` (${pdf.filename})` : "") +
+        "."
+      );
+    }
 
     const ticket = {
       doklad,
@@ -165,26 +187,59 @@ class CDTakeoutImporter {
   }
 
   async extractPdfText(content) {
-    const bytes = content instanceof Uint8Array ? content : new Uint8Array(content);
-    const pdfDoc = await pdfjsLib.getDocument({ data: bytes }).promise;
-    let fullText = "";
-    for (let i = 1; i <= pdfDoc.numPages; i++) {
-      const page = await pdfDoc.getPage(i);
-      const textContent = await page.getTextContent();
-      let lastY = null;
-      let line = "";
-      for (const item of textContent.items) {
-        const y = item.transform[5];
-        if (lastY !== null && Math.abs(y - lastY) > 5) {
-          fullText += line.trim() + "\n";
-          line = "";
-        }
-        line += item.str + " ";
-        lastY = y;
-      }
-      if (line.trim()) fullText += line.trim() + "\n";
+    let bytes;
+    if (content instanceof Uint8Array) {
+      bytes = content;
+    } else if (content instanceof ArrayBuffer) {
+      bytes = new Uint8Array(content);
+    } else if (content && content.buffer instanceof ArrayBuffer) {
+      bytes = new Uint8Array(content.buffer, content.byteOffset || 0, content.byteLength);
+    } else if (typeof Blob !== "undefined" && content instanceof Blob) {
+      bytes = new Uint8Array(await content.arrayBuffer());
+    } else {
+      throw new Error("Neznámý formát obsahu PDF přílohy.");
     }
-    return fullText;
+
+    if (!bytes.length) throw new Error("PDF příloha je prázdná.");
+
+    const read = async (disableWorker) => {
+      const loadingTask = pdfjsLib.getDocument({
+        data: bytes,
+        disableWorker: !!disableWorker,
+        useWorkerFetch: false,
+        isEvalSupported: false
+      });
+      const pdfDoc = await loadingTask.promise;
+      let fullText = "";
+
+      for (let i = 1; i <= pdfDoc.numPages; i++) {
+        const page = await pdfDoc.getPage(i);
+        const textContent = await page.getTextContent({
+          normalizeWhitespace: true,
+          disableCombineTextItems: false
+        });
+        fullText += textContent.items
+          .map(item => String(item.str || ""))
+          .filter(Boolean)
+          .join(" ") + "\n";
+      }
+
+      try { await pdfDoc.destroy(); } catch (_) {}
+      return fullText;
+    };
+
+    try {
+      return await read(false);
+    } catch (workerError) {
+      try {
+        return await read(true);
+      } catch (directError) {
+        throw new Error(
+          "PDF se nepodařilo přečíst: " +
+          (directError?.message || workerError?.message || "neznámá chyba")
+        );
+      }
+    }
   }
 
   parseIcs(text) {
